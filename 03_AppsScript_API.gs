@@ -144,70 +144,42 @@ function login(params) {
 
 // ============== LECTURA ==============
 
-// Extrae { lat, lng } de una URL larga de Google Maps, o null.
-function _parsearCoordsDeUrl(s) {
-  var m = s.match(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
-  if (m) return { lat: parseFloat(m[1]), lng: parseFloat(m[2]) };
-  m = s.match(/[?&]q=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
-  if (m) return { lat: parseFloat(m[1]), lng: parseFloat(m[2]) };
-  m = s.match(/!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/);
-  if (m) return { lat: parseFloat(m[1]), lng: parseFloat(m[2]) };
-  return null;
-}
-
-// Resuelve una URL de Google Maps (incluyendo links cortos) y devuelve { lat, lng } o null.
-function resolverCoordenadas(url) {
-  if (!url) return null;
-  var s = String(url).trim();
+// Parsea coordenadas en formato DMS (34°52'04.2"S 58°10'27.3"W) o decimal (-34.868, -58.174)
+// Devuelve { lat, lng } o null.
+function parsearCoordenadas(texto) {
+  if (!texto) return null;
+  var s = String(texto).trim();
   if (!s) return null;
 
-  // Si es un link corto, seguir la cadena de redirects manualmente
-  if (s.indexOf('goo.gl') !== -1 || s.indexOf('maps.app') !== -1) {
-    try {
-      var current = s;
-      for (var i = 0; i < 10; i++) {
-        var resp = UrlFetchApp.fetch(current, { followRedirects: false, muteHttpExceptions: true });
-        var code = resp.getResponseCode();
-        var headers = resp.getHeaders();
-        var loc = headers['Location'] || headers['location'] || '';
-
-        // Si hay redirect, revisar si la nueva URL ya tiene coordenadas
-        if (loc && (code === 301 || code === 302 || code === 303 || code === 307)) {
-          var coords = _parsearCoordsDeUrl(loc);
-          if (coords) return coords;
-          current = loc;
-          continue;
-        }
-
-        // Si no hay más redirects, buscar en el HTML de la respuesta final
-        var body = resp.getContentText();
-        // Buscar URL larga de Maps embebida en el HTML
-        var urlMatch = body.match(/https:\/\/www\.google\.com\/maps\/[^"'\s\\]+/);
-        if (urlMatch) {
-          var coords2 = _parsearCoordsDeUrl(urlMatch[0]);
-          if (coords2) return coords2;
-        }
-        break;
-      }
-    } catch (_) {}
+  // Formato DMS: 34°52'04.2"S 58°10'27.3"W
+  var dms = s.match(/(\d+)[°]\s*(\d+)[''′]\s*([\d.]+)[""″]?\s*([NSns])\s+(\d+)[°]\s*(\d+)[''′]\s*([\d.]+)[""″]?\s*([EWOewo])/);
+  if (dms) {
+    var lat = parseFloat(dms[1]) + parseFloat(dms[2]) / 60 + parseFloat(dms[3]) / 3600;
+    var lng = parseFloat(dms[5]) + parseFloat(dms[6]) / 60 + parseFloat(dms[7]) / 3600;
+    if (dms[4].toUpperCase() === 'S') lat = -lat;
+    if (dms[8].toUpperCase() === 'W' || dms[8].toUpperCase() === 'O') lng = -lng;
+    return { lat: lat, lng: lng };
   }
 
-  // URL directa (no es link corto)
-  return _parsearCoordsDeUrl(s);
+  // Formato decimal: -34.868, -58.174  o  -34.868 -58.174
+  var dec = s.match(/(-?\d+(?:\.\d+)?)[,\s]+(-?\d+(?:\.\d+)?)/);
+  if (dec) return { lat: parseFloat(dec[1]), lng: parseFloat(dec[2]) };
+
+  return null;
 }
 
 function getProducts()   { return sheetData(SHEET_PRODUCTOS).filter(p => p.Activo !== 'No'); }
 
 function getZones() {
   return sheetData(SHEET_ZONAS).filter(z => z.Activo !== 'No').map(z => {
-    z._coords = resolverCoordenadas(z.Ubicacion);
+    z._coords = parsearCoordenadas(z.Coordenadas);
     return z;
   });
 }
 
 function getObras() {
   return sheetData(SHEET_OBRAS).map(o => {
-    o._coords = resolverCoordenadas(o.Ubicacion);
+    o._coords = parsearCoordenadas(o.Coordenadas);
     return o;
   });
 }

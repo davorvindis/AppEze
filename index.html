@@ -2290,19 +2290,6 @@ async function submitZona() {
 
 // ============== MAPAS (Google Maps) ==============
 
-// Parsea un link de Google Maps y devuelve { lat, lng } o null.
-function parseLatLng(url) {
-  if (!url) return null;
-  const s = String(url);
-  let m = s.match(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
-  if (m) return { lat: parseFloat(m[1]), lng: parseFloat(m[2]) };
-  m = s.match(/[?&]q=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
-  if (m) return { lat: parseFloat(m[1]), lng: parseFloat(m[2]) };
-  m = s.match(/!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/);
-  if (m) return { lat: parseFloat(m[1]), lng: parseFloat(m[2]) };
-  return null;
-}
-
 let _mapInstance = null;
 let _mapMarkers = [];
 let _mapInfoWindow = null;
@@ -2315,8 +2302,7 @@ function _destroyMap() {
 }
 
 function _renderMapModal(titulo, items, color) {
-  // Usar coordenadas del backend (_coords) si existen, sino parsear del cliente
-  const parsed = items.map(it => ({ ...it, ll: it.coords || parseLatLng(it.ubicacionUrl) }));
+  const parsed = items.map(it => ({ ...it, ll: it.coords || null }));
   const ok  = parsed.filter(p => p.ll);
   const bad = parsed.filter(p => !p.ll);
 
@@ -2330,10 +2316,10 @@ function _renderMapModal(titulo, items, color) {
       <details style="margin-top:10px;">
         <summary style="cursor:pointer;color:var(--muted);font-size:13px;">Sin ubicación (${bad.length})</summary>
         <div style="font-size:12px;color:var(--muted);margin-top:6px;">
-          ${bad.map(b => `• ${attrEsc(b.nombre)}${b.ubicacionUrl ? ' (link corto, no se pudo parsear)' : ' (sin link)'}`).join('<br>')}
+          ${bad.map(b => `• ${attrEsc(b.nombre)} (sin coordenadas)`).join('<br>')}
         </div>
         <div class="hint" style="margin-top:6px;">
-          Tip: si el link es de <code>maps.app.goo.gl</code> o <code>goo.gl/maps</code>, abrilo en el navegador, esperá que redirija, y copiá la URL larga que tiene las coordenadas.
+          Tip: en Google Maps, tocá y mantené un punto → copiá las coordenadas (ej: 34°52'04.2"S 58°10'27.3"W) y pegalas en la columna Coordenadas del Sheet.
         </div>
       </details>
     ` : ''}
@@ -2394,11 +2380,12 @@ function _renderMapModal(titulo, items, color) {
         title: p.nombre
       });
 
+      const mapsUrl = p.ubicacionUrl || _mapsLink(p.ll);
       const infoHtml =
         `<div style="min-width:180px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
           <div style="font-weight:700;margin-bottom:4px;font-size:14px;">${attrEsc(p.nombre)}</div>
           ${p.subtitulo ? `<div style="font-size:12px;color:#555;margin-bottom:6px;">${attrEsc(p.subtitulo)}</div>` : ''}
-          <a href="${attrEsc(p.ubicacionUrl)}" target="_blank" style="font-size:12px;color:#1a73e8;">Abrir en Google Maps ↗</a>
+          ${mapsUrl ? `<a href="${attrEsc(mapsUrl)}" target="_blank" style="font-size:12px;color:#1a73e8;">Abrir en Google Maps ↗</a>` : ''}
         </div>`;
 
       marker.addListener('click', () => {
@@ -2441,6 +2428,12 @@ function openMapaZonas() {
     coords: z._coords || null,
   }));
   _renderMapModal('📍 Depósitos en el mapa', items, '#1F4E78');
+}
+
+// Arma un link de Google Maps a partir de coordenadas
+function _mapsLink(coords) {
+  if (!coords) return '';
+  return 'https://www.google.com/maps?q=' + coords.lat + ',' + coords.lng;
 }
 
 // ============== MODAL / NAV ==============
