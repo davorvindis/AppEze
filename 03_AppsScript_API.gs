@@ -144,9 +144,46 @@ function login(params) {
 
 // ============== LECTURA ==============
 
+// Resuelve una URL de Google Maps (incluyendo links cortos) y devuelve { lat, lng } o null.
+function resolverCoordenadas(url) {
+  if (!url) return null;
+  var s = String(url).trim();
+  if (!s) return null;
+
+  // Si es un link corto, seguir el redirect para obtener la URL larga
+  if (s.indexOf('goo.gl') !== -1 || s.indexOf('maps.app') !== -1) {
+    try {
+      var resp = UrlFetchApp.fetch(s, { followRedirects: false, muteHttpExceptions: true });
+      var loc = resp.getHeaders()['Location'] || resp.getHeaders()['location'] || '';
+      if (loc) s = loc;
+    } catch (_) {}
+  }
+
+  // Parsear coordenadas de la URL larga
+  var m = s.match(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
+  if (m) return { lat: parseFloat(m[1]), lng: parseFloat(m[2]) };
+  m = s.match(/[?&]q=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
+  if (m) return { lat: parseFloat(m[1]), lng: parseFloat(m[2]) };
+  m = s.match(/!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/);
+  if (m) return { lat: parseFloat(m[1]), lng: parseFloat(m[2]) };
+  return null;
+}
+
 function getProducts()   { return sheetData(SHEET_PRODUCTOS).filter(p => p.Activo !== 'No'); }
-function getZones()      { return sheetData(SHEET_ZONAS).filter(z => z.Activo !== 'No'); }
-function getObras()      { return sheetData(SHEET_OBRAS); }
+
+function getZones() {
+  return sheetData(SHEET_ZONAS).filter(z => z.Activo !== 'No').map(z => {
+    z._coords = resolverCoordenadas(z.Ubicacion);
+    return z;
+  });
+}
+
+function getObras() {
+  return sheetData(SHEET_OBRAS).map(o => {
+    o._coords = resolverCoordenadas(o.Ubicacion);
+    return o;
+  });
+}
 function getCategorias() { return sheetData(SHEET_CATEGORIAS); }
 
 function getStock() {

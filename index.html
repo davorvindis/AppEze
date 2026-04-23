@@ -2315,7 +2315,8 @@ function _destroyMap() {
 }
 
 function _renderMapModal(titulo, items, color) {
-  const parsed = items.map(it => ({ ...it, ll: parseLatLng(it.ubicacionUrl) }));
+  // Usar coordenadas del backend (_coords) si existen, sino parsear del cliente
+  const parsed = items.map(it => ({ ...it, ll: it.coords || parseLatLng(it.ubicacionUrl) }));
   const ok  = parsed.filter(p => p.ll);
   const bad = parsed.filter(p => !p.ll);
 
@@ -2427,6 +2428,7 @@ function openMapaObras() {
       nombre: o.Nombre || o.Codigo,
       subtitulo: [o.Codigo, o.Direccion, o.Autorizante ? 'Autoriza: ' + o.Autorizante : null].filter(Boolean).join(' · '),
       ubicacionUrl: o.Ubicacion || '',
+      coords: o._coords || null,
     }));
   _renderMapModal('📍 Obras en el mapa', items, '#C0392B');
 }
@@ -2436,6 +2438,7 @@ function openMapaZonas() {
     nombre: z.Nombre || z.Codigo,
     subtitulo: [z.Codigo, z.Descripcion].filter(Boolean).join(' · '),
     ubicacionUrl: z.Ubicacion || '',
+    coords: z._coords || null,
   }));
   _renderMapModal('📍 Depósitos en el mapa', items, '#1F4E78');
 }
