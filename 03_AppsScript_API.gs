@@ -495,13 +495,20 @@ function diagnosticoDrive() {
 // loguea el ID para que lo pegues en DRIVE_ROOT_FOLDER_ID.
 function crearCarpetaStockGalpones() {
   // Si ya existe una carpeta con ese nombre en la raíz, la reutilizo.
+  // OJO: en algunas cuentas getFoldersByName tira "Service error: Drive".
+  // Si falla, creamos directo — una sola vez no es drama.
   const nombre = 'Stock Galpones';
-  const existing = DriveApp.getRootFolder().getFoldersByName(nombre);
-  let folder;
-  if (existing.hasNext()) {
-    folder = existing.next();
-    Logger.log('Ya existía una carpeta llamada "' + nombre + '". Reutilizando.');
-  } else {
+  let folder = null;
+  try {
+    const existing = DriveApp.getRootFolder().getFoldersByName(nombre);
+    if (existing.hasNext()) {
+      folder = existing.next();
+      Logger.log('Ya existía una carpeta llamada "' + nombre + '". Reutilizando.');
+    }
+  } catch (e) {
+    Logger.log('El iterador de Drive falló (' + e.message + '). Voy a crear la carpeta directo.');
+  }
+  if (!folder) {
     folder = DriveApp.createFolder(nombre);
     Logger.log('Carpeta creada: ' + nombre);
   }
@@ -516,10 +523,35 @@ function crearCarpetaStockGalpones() {
   return id;
 }
 
+// NOTA IMPORTANTE sobre el iterador de Drive:
+// En algunas cuentas, los iteradores de DriveApp (getFolders, getFoldersByName,
+// getFiles, getFilesByName) tiran "Service error: Drive" de manera
+// intermitente/persistente. No es un problema de permisos (createFolder y
+// getFolderById funcionan). Para no depender del iterador:
+//   1) cacheamos el ID de cada carpeta que necesitamos en Script Properties.
+//   2) si el iterador falla, directamente creamos la carpeta.
+// Así, a partir de la 2da llamada ya no usamos el iterador.
+function _folderCacheKey(parent, name) { return 'folder::' + parent.getId() + '::' + name; }
+
 function ensureFolder(parent, name) {
-  const it = parent.getFoldersByName(name);
-  if (it.hasNext()) return it.next();
-  return parent.createFolder(name);
+  const props = PropertiesService.getScriptProperties();
+  const key = _folderCacheKey(parent, name);
+  const cachedId = props.getProperty(key);
+  if (cachedId) {
+    try {
+      const f = DriveApp.getFolderById(cachedId);
+      if (!f.isTrashed()) return f;
+    } catch (_) { /* cache vencido, seguimos */ }
+  }
+  // Intentamos el iterador; si falla, creamos.
+  let found = null;
+  try {
+    const it = parent.getFoldersByName(name);
+    if (it.hasNext()) found = it.next();
+  } catch (_) { /* Service error: Drive — vamos a crear */ }
+  if (!found) found = parent.createFolder(name);
+  props.setProperty(key, found.getId());
+  return found;
 }
 
 function sanitizeFileName(name) {
