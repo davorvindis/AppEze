@@ -1678,21 +1678,26 @@ function renderLiberaBasket() {
     ).join('');
 
     const zonaOpts = zonas.map(z => {
-      // cantidad total reservada en esa zona para el SKU (sumando obras)
-      const vig = (STATE.reservasDetalle || [])
+      // cantidad total reservada en esa zona para el SKU (sumando todas las obras)
+      const totalZona = (STATE.reservasDetalle || [])
         .filter(r => r.SKU === line.sku && r.Zona === z.Codigo)
         .reduce((a, r) => a + Number(r.Cantidad || 0), 0);
-      return `<option value="${attrEsc(z.Codigo)}" ${line.zona === z.Codigo ? 'selected' : ''}>${attrEsc(z.Nombre)} (res: ${vig})</option>`;
+      const nObras = (STATE.reservasDetalle || [])
+        .filter(r => r.SKU === line.sku && r.Zona === z.Codigo).length;
+      const suffix = nObras > 1 ? ` · ${totalZona} reservadas en ${nObras} obras` : ` · ${totalZona} reservadas`;
+      return `<option value="${attrEsc(z.Codigo)}" ${line.zona === z.Codigo ? 'selected' : ''}>${attrEsc(z.Nombre)}${suffix}</option>`;
     }).join('');
 
     const obraOpts = obras.map(o => {
       const vig = reservaVigente(line.sku, line.zona, o.Codigo);
-      return `<option value="${attrEsc(o.Codigo)}" ${line.obra === o.Codigo ? 'selected' : ''}>${attrEsc(o.Codigo)} — ${attrEsc(o.Nombre)} (res: ${vig})</option>`;
+      const unid = prod && prod.Unidad ? ' ' + prod.Unidad : '';
+      return `<option value="${attrEsc(o.Codigo)}" ${line.obra === o.Codigo ? 'selected' : ''}>${attrEsc(o.Codigo)} — ${attrEsc(o.Nombre)} · reservado: ${vig}${attrEsc(unid)}</option>`;
     }).join('');
 
     const vigLinea = (line.sku && line.zona && line.obra) ? reservaVigente(line.sku, line.zona, line.obra) : 0;
     const cantNum = parseFloat(line.cantidad || '0');
     const excede = cantNum > 0 && cantNum > vigLinea;
+    const quedara = vigLinea - (excede ? 0 : cantNum);
 
     // Opciones de destino
     const zonaDestOpts = STATE.zonas.map(z =>
@@ -1746,10 +1751,11 @@ function renderLiberaBasket() {
           </div>
           ${line.obra ? `
             <div class="field">
-              <label>Cantidad${prod ? ' (' + attrEsc(prod.Unidad || '') + ')' : ''} — vigente: ${vigLinea}</label>
-              <input type="number" step="0.01" inputmode="decimal" value="${attrEsc(line.cantidad)}" oninput="onLrCantChange(${idx}, this.value)" placeholder="Ej: ${vigLinea} para liberar todo">
+              <label>Cantidad a liberar${prod ? ' (' + attrEsc(prod.Unidad || '') + ')' : ''} — reservado en esta obra: <strong style="color:var(--purple)">${vigLinea}</strong></label>
+              <input type="number" step="0.01" inputmode="decimal" max="${vigLinea}" value="${attrEsc(line.cantidad)}" oninput="onLrCantChange(${idx}, this.value)" placeholder="Ej: ${vigLinea} para liberar toda la reserva">
+              ${cantNum > 0 && !excede ? `<div class="hint" style="margin-top:4px;">Quedarán <strong>${quedara}</strong> ${attrEsc(prod && prod.Unidad ? prod.Unidad : 'u.')} reservadas para esta obra después de liberar.</div>` : ''}
             </div>
-            ${excede ? `<div class="alert alert-err" style="margin:4px 0 0;">⚠ Excede la reserva vigente (${vigLinea})</div>` : ''}
+            ${excede ? `<div class="alert alert-err" style="margin:4px 0 0;">⚠ Excede la reserva de esta obra (máximo: ${vigLinea})</div>` : ''}
             <div class="field" style="margin-top:8px;">
               <label>¿A dónde va el stock liberado?</label>
               <div class="seg" style="display:flex;gap:6px;margin-bottom:6px;">
