@@ -150,27 +150,44 @@ function resolverCoordenadas(url) {
   var s = String(url).trim();
   if (!s) return null;
 
-  // Si es un link corto, seguir redirects hasta obtener la URL final
+  // Si es un link corto, seguir redirects y buscar en el HTML
   if (s.indexOf('goo.gl') !== -1 || s.indexOf('maps.app') !== -1) {
     try {
-      // followRedirects:true deja que UrlFetchApp siga todos los redirects
       var resp = UrlFetchApp.fetch(s, { followRedirects: true, muteHttpExceptions: true });
-      // La URL final queda en el contenido HTML — buscar coordenadas ahí
       var body = resp.getContentText();
-      // Buscar en la URL final (a veces está en un meta refresh o en el body)
-      var finalUrl = resp.getUrl ? resp.getUrl() : '';
-      if (finalUrl) s = finalUrl;
-      // También buscar coordenadas en el HTML por si la URL no las tiene
-      var m = body.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
-      if (m) return { lat: parseFloat(m[1]), lng: parseFloat(m[2]) };
-      m = body.match(/center=(-?\d+\.\d+)(?:%2C|,)(-?\d+\.\d+)/);
-      if (m) return { lat: parseFloat(m[1]), lng: parseFloat(m[2]) };
-      m = body.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/);
-      if (m) return { lat: parseFloat(m[1]), lng: parseFloat(m[2]) };
+
+      // 1) Buscar la URL canónica (og:url o link canonical) — tiene las coords reales
+      var canon = body.match(/(?:og:url|rel="canonical")[^>]*content="([^"]+)"/);
+      if (!canon) canon = body.match(/href="(https:\/\/www\.google\.com\/maps\/place\/[^"]+)"/);
+      if (canon && canon[1]) {
+        var cu = canon[1];
+        var cm = cu.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
+        if (cm) return { lat: parseFloat(cm[1]), lng: parseFloat(cm[2]) };
+      }
+
+      // 2) Buscar todos los !3d...!4d... y filtrar el default de EEUU (37.0625,-95.677)
+      var re3d = /!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/g;
+      var match;
+      while ((match = re3d.exec(body)) !== null) {
+        var lat = parseFloat(match[1]);
+        var lng = parseFloat(match[2]);
+        // Saltear el centro default de EEUU
+        if (Math.abs(lat - 37.0625) < 0.01 && Math.abs(lng - (-95.677)) < 0.01) continue;
+        return { lat: lat, lng: lng };
+      }
+
+      // 3) Buscar todos los @lat,lng y filtrar el default
+      var reAt = /@(-?\d+\.\d+),(-?\d+\.\d+)/g;
+      while ((match = reAt.exec(body)) !== null) {
+        var lat2 = parseFloat(match[1]);
+        var lng2 = parseFloat(match[2]);
+        if (Math.abs(lat2 - 37.0625) < 0.01 && Math.abs(lng2 - (-95.677)) < 0.01) continue;
+        return { lat: lat2, lng: lng2 };
+      }
     } catch (_) {}
   }
 
-  // Parsear coordenadas de la URL directa
+  // Parsear coordenadas de la URL directa (no es link corto)
   var m = s.match(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
   if (m) return { lat: parseFloat(m[1]), lng: parseFloat(m[2]) };
   m = s.match(/[?&]q=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
