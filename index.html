@@ -859,6 +859,7 @@ function showDetalle(sku) {
     </div>
     <div class="btn-row" style="margin-top:8px;">
       <button class="btn btn-accent" onclick='openSubirFoto(${jsStr(sku)})'>${prod.Foto_URL ? '📷 Cambiar foto' : '📷 Foto'}</button>
+      <button class="btn btn-purple" onclick='generarEtiquetaProducto(${jsStr(sku)})'>🏷️ Etiqueta</button>
       ${prod.QR_URL ? '' : `<button class="btn btn-primary" onclick='generarQRProducto(${jsStr(sku)})'>🔗 QR</button>`}
     </div>
     ${prod.QR_URL ? `
@@ -2050,6 +2051,171 @@ function blobToBase64(blob) {
     reader.onerror = rej;
     reader.readAsDataURL(blob);
   });
+}
+
+// ============== ETIQUETA PNG ==============
+// Genero una etiqueta imprimible 600x900 (proporción 2:3, entra 6 por A4)
+// con header corporativo, nombre del producto, QR grande y SKU + footer.
+// Todo en el cliente: canvas → PNG → descarga directa. No pasa por Drive.
+async function generarEtiquetaProducto(sku) {
+  const prod = STATE.productos.find(p => p.SKU === sku);
+  if (!prod) return;
+  const container = document.getElementById('qr-container');
+  if (container) container.innerHTML = '<div class="alert alert-info">Generando etiqueta...</div>';
+  try {
+    // 1) QR en alta res via api.qrserver.com (responde con CORS abierto, así
+    //    podemos usarlo en el canvas sin "taintear" el drawing buffer).
+    const qrDestino = `${API_URL}?action=infoProducto&sku=${encodeURIComponent(sku)}`;
+    const qrApiUrl  = `https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(qrDestino)}&size=500x500&margin=2&format=png&ecc=M`;
+    const qrImg = await _loadImageCors(qrApiUrl);
+
+    // 2) Compongo la etiqueta.
+    const W = 600, H = 900;
+    const canvas = document.createElement('canvas');
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext('2d');
+    const FONT_SANS = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+    const FONT_MONO = '"SF Mono", Menlo, Consolas, "Liberation Mono", monospace';
+
+    // Fondo blanco
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, W, H);
+
+    // Header azul corporativo
+    ctx.fillStyle = '#1F4E78';
+    ctx.fillRect(0, 0, W, 100);
+
+    // Texto header
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = `700 28px ${FONT_SANS}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('📦 STOCK · GALPONES', W/2, 50);
+
+    // Barra de acento (verde) debajo del header
+    ctx.fillStyle = '#2E8B57';
+    ctx.fillRect(0, 100, W, 4);
+
+    // Nombre del producto (wrap a max 2 líneas, con elipsis si sobra)
+    ctx.fillStyle = '#1F2937';
+    ctx.font = `700 34px ${FONT_SANS}`;
+    const nombreLines = _wrapText(ctx, (prod.Nombre || '').trim(), W - 60, 2);
+    const nombreStartY = nombreLines.length === 1 ? 180 : 162;
+    nombreLines.forEach((line, i) => ctx.fillText(line, W/2, nombreStartY + i * 42));
+
+    // Pill de categoría / subcategoría
+    const catLabel = (prod.Subcategoria || prod.Categoria || '').trim();
+    if (catLabel) {
+      ctx.font = `600 18px ${FONT_SANS}`;
+      const padX = 16, pillH = 34;
+      const textW = ctx.measureText(catLabel).width;
+      const pillW = Math.min(textW + padX * 2, W - 80);
+      const pillX = (W - pillW) / 2;
+      const pillY = 248;
+      _roundRect(ctx, pillX, pillY, pillW, pillH, 17);
+      ctx.fillStyle = '#E3F0E8';
+      ctx.fill();
+      ctx.fillStyle = '#1E6340';
+      ctx.fillText(catLabel, W/2, pillY + pillH/2 + 1);
+    }
+
+    // Card gris claro que enmarca el QR
+    _roundRect(ctx, 50, 306, W - 100, 520, 20);
+    ctx.fillStyle = '#F9FAFB';
+    ctx.fill();
+    ctx.strokeStyle = '#E5E7EB';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // QR centrado en el card
+    const qrSize = 470;
+    ctx.drawImage(qrImg, (W - qrSize)/2, 331, qrSize, qrSize);
+
+    // SKU en monospace, color primary
+    ctx.fillStyle = '#1F4E78';
+    ctx.font = `700 26px ${FONT_MONO}`;
+    ctx.fillText(prod.SKU || '', W/2, 852);
+
+    // Footer gris
+    ctx.fillStyle = '#9CA3AF';
+    ctx.font = `400 14px ${FONT_SANS}`;
+    ctx.fillText('Escaneá para ver stock en tiempo real', W/2, 882);
+
+    // 3) Descargo el PNG
+    const pngBlob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+    const pngUrl = URL.createObjectURL(pngBlob);
+    const a = document.createElement('a');
+    a.href = pngUrl;
+    a.download = `etiqueta_${prod.SKU}_${_slugify(prod.Nombre)}.png`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(pngUrl), 3000);
+
+    // 4) Preview en el container del modal
+    if (container) container.innerHTML = `
+      <div class="alert alert-ok">Etiqueta generada y descargada ✓</div>
+      <img src="${pngUrl}" alt="Etiqueta ${attrEsc(sku)}" style="max-width:280px;display:block;margin:10px auto;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.12);">
+      <div class="hint" style="text-align:center;">PNG 600×900. Imprimila tal cual o metela en una hoja A4 (entran ~6).</div>`;
+  } catch (err) {
+    if (container) container.innerHTML = `<div class="alert alert-err">${attrEsc(err.message)}</div>`;
+  }
+}
+
+// ---- Helpers para la etiqueta ----
+function _loadImageCors(url) {
+  return new Promise((res, rej) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => res(img);
+    img.onerror = () => rej(new Error('No se pudo cargar el QR desde api.qrserver.com'));
+    img.src = url;
+  });
+}
+
+function _wrapText(ctx, text, maxWidth, maxLines) {
+  const words = (text || '').split(/\s+/).filter(Boolean);
+  const lines = [];
+  let cur = '';
+  for (const w of words) {
+    const test = cur ? cur + ' ' + w : w;
+    if (ctx.measureText(test).width > maxWidth && cur) {
+      lines.push(cur);
+      cur = w;
+    } else {
+      cur = test;
+    }
+  }
+  if (cur) lines.push(cur);
+  if (maxLines && lines.length > maxLines) {
+    lines.length = maxLines;
+    while (ctx.measureText(lines[maxLines-1] + '…').width > maxWidth && lines[maxLines-1].length > 0) {
+      lines[maxLines-1] = lines[maxLines-1].slice(0, -1);
+    }
+    lines[maxLines-1] += '…';
+  }
+  return lines;
+}
+
+function _roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+function _slugify(s) {
+  return (s || '').toString()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^\w\s-]/g, '').trim()
+    .replace(/\s+/g, '-')
+    .substring(0, 40);
 }
 
 // ============== ZONAS ==============
