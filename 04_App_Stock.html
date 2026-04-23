@@ -154,11 +154,13 @@
   .total-big { font-size:20px; font-weight:700; color:var(--primary); }
   .unit { font-size:11px; color:var(--muted); }
   .badge-warn { background:var(--warn); color:#fff; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600; }
-  .fab { position:fixed; bottom:12px; right:12px; left:12px; max-width:760px; margin:0 auto; display:grid; grid-template-columns:repeat(4,1fr); gap:6px; z-index:20; }
-  .fab button { padding:12px 6px; border:none; border-radius:10px; font-size:13px; font-weight:600; color:#fff; cursor:pointer; box-shadow:0 4px 12px rgba(0,0,0,.15); }
+  .fab { position:fixed; bottom:12px; right:12px; left:12px; max-width:760px; margin:0 auto; display:grid; grid-template-columns:repeat(3,1fr); gap:6px; z-index:20; }
+  .fab button { padding:10px 4px; border:none; border-radius:10px; font-size:12px; font-weight:600; color:#fff; cursor:pointer; box-shadow:0 4px 12px rgba(0,0,0,.15); }
   .fab .b-in  { background:var(--accent); }
   .fab .b-tr  { background:var(--primary); }
   .fab .b-eg  { background:var(--orange); }
+  .fab .b-re  { background:var(--purple); }
+  .fab .b-li  { background:#475569; }
   .fab .b-aj  { background:#6B7280; }
 
   /* Modal */
@@ -338,6 +340,8 @@
   <button class="b-in" onclick="openMovimiento('Ingreso')">+ Ingreso</button>
   <button class="b-tr" onclick="openMovimiento('Traslado')">↔ Traslado</button>
   <button class="b-eg" onclick="openEgresoMasivo()">→ Egreso</button>
+  <button class="b-re" onclick="openReservaMasiva()">📌 Reservar</button>
+  <button class="b-li" onclick="openLiberaMasiva()">↺ Liberar</button>
   <button class="b-aj" onclick="openMovimiento('Ajuste')">± Ajuste</button>
 </div>
 
@@ -384,6 +388,8 @@ let STATE = {
   reservasDetalle: [],  // [{SKU, Zona, Obra, Cantidad}] — solo > 0 (vigentes)
   currentZone: 'TODAS',
   egresoBasket: [],
+  reservaBasket: [],  // [{sku, zona, cantidad}]
+  liberaBasket: [],   // [{sku, zona, obra, cantidad}]
 };
 let USUARIOS_LIST = [];  // cache de getUsuarios
 let SESSION = null;      // { user, nombre }
@@ -818,8 +824,8 @@ function showDetalle(sku) {
       <div class="row"><span>Mínimo</span><span>${r.Minimo || 0}</span></div>
     </div>
     <div class="btn-row" style="margin-top:12px;">
-      <button class="btn btn-purple" onclick='openMovimiento("Reserva", ${jsStr(sku)})'>📌 Reservar</button>
-      <button class="btn btn-secondary" onclick='openMovimiento("Libera_Reserva", ${jsStr(sku)})'>Liberar</button>
+      <button class="btn btn-purple" onclick='openReservaMasiva(${jsStr(sku)})'>📌 Reservar</button>
+      <button class="btn btn-secondary" onclick='openLiberaMasiva(${jsStr(sku)})'>↺ Liberar</button>
     </div>
     <div class="btn-row" style="margin-top:8px;">
       <button class="btn btn-accent" onclick='openSubirFoto(${jsStr(sku)})'>${prod.Foto_URL ? '📷 Cambiar foto' : '📷 Foto'}</button>
@@ -1287,6 +1293,380 @@ async function submitEgresoMasivo() {
   }
   if (errs.length === 0) {
     document.getElementById('mov-msg').innerHTML = `<div class="alert alert-ok">${okCount} egresos registrados ✓</div>`;
+    setTimeout(() => { closeModal(); init(); }, 700);
+  } else {
+    document.getElementById('mov-msg').innerHTML =
+      `<div class="alert alert-ok">${okCount} OK</div>` +
+      `<div class="alert alert-err">${errs.length} con error:<br>${errs.map(attrEsc).join('<br>')}</div>`;
+    init();
+  }
+}
+
+// ============== RESERVA MASIVA (estilo Egreso, una obra, varios productos) ==============
+function openReservaMasiva(skuPreseleccionado) {
+  STATE.reservaBasket = [];
+  if (skuPreseleccionado) {
+    const zonas = getZonasConStock(skuPreseleccionado);
+    if (zonas.length > 0) {
+      STATE.reservaBasket.push({ sku: skuPreseleccionado, zona: zonas[0].Codigo, cantidad: '' });
+    } else {
+      STATE.reservaBasket.push({ sku: skuPreseleccionado, zona: '', cantidad: '' });
+    }
+  }
+  if (STATE.reservaBasket.length === 0) {
+    STATE.reservaBasket.push({ sku: '', zona: '', cantidad: '' });
+  }
+
+  const obraOptions = STATE.obras.filter(o => o.Estado !== 'Finalizada')
+    .map(o => `<option value="${attrEsc(o.Codigo)}">${attrEsc(o.Codigo)} — ${attrEsc(o.Nombre)}</option>`).join('');
+
+  openModal(`
+    <h2>📌 Reservar para Obra</h2>
+    <div id="mov-msg"></div>
+    <div class="field">
+      <label>Obra *</label>
+      <div class="row-with-btn">
+        <select id="rv-obra"><option value="">-- elegir --</option>${obraOptions}</select>
+        <button type="button" onclick="openNuevaObra()">+ Nueva</button>
+      </div>
+    </div>
+    <div class="field"><label>Notas (se aplican a todos)</label><textarea id="rv-notas" placeholder="ej: motivo de la reserva"></textarea></div>
+    <h3 style="color:var(--purple);font-size:15px;margin:10px 0 6px;">🛒 Productos a reservar</h3>
+    <div id="rv-basket"></div>
+    <button class="add-line-btn" onclick="rvAgregarLinea()">+ Agregar otro producto</button>
+    <div class="hint" id="rv-summary" style="text-align:right;"></div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-purple" id="rv-btn" onclick="submitReservaMasiva()">Guardar todo</button>
+    </div>
+  `);
+  renderReservaBasket();
+}
+
+function rvAgregarLinea() { STATE.reservaBasket.push({ sku: '', zona: '', cantidad: '' }); renderReservaBasket(); }
+function rvQuitarLinea(idx) {
+  STATE.reservaBasket.splice(idx, 1);
+  if (STATE.reservaBasket.length === 0) rvAgregarLinea();
+  renderReservaBasket();
+}
+function onRvSkuChange(idx, value) {
+  STATE.reservaBasket[idx].sku = value;
+  const zonas = getZonasConStock(value);
+  const actual = STATE.reservaBasket[idx].zona;
+  if (!zonas.find(z => z.Codigo === actual)) {
+    STATE.reservaBasket[idx].zona = zonas.length > 0 ? zonas[0].Codigo : '';
+  }
+  renderReservaBasket();
+}
+function onRvZonaChange(idx, value) { STATE.reservaBasket[idx].zona = value; renderReservaBasket(); }
+function onRvCantChange(idx, value) { STATE.reservaBasket[idx].cantidad = value; validarReservaBasket(); }
+
+function renderReservaBasket() {
+  const c = document.getElementById('rv-basket');
+  if (!c) return;
+  const prodElegibles = productosConStock();
+
+  c.innerHTML = STATE.reservaBasket.map((line, idx) => {
+    const prod = STATE.productos.find(p => p.SKU === line.sku);
+    const zonasConStock = line.sku ? getZonasConStock(line.sku) : [];
+
+    const prodOpts = prodElegibles.map(p =>
+      `<option value="${attrEsc(p.SKU)}" ${line.sku === p.SKU ? 'selected' : ''}>${attrEsc(p.SKU)} — ${attrEsc(p.Nombre)}</option>`
+    ).join('');
+
+    const zonaOpts = zonasConStock.map(z => {
+      const st = getStockEnZona(line.sku, z.Codigo);
+      return `<option value="${attrEsc(z.Codigo)}" ${line.zona === z.Codigo ? 'selected' : ''}>${attrEsc(z.Nombre)} (disp: ${st})</option>`;
+    }).join('');
+
+    const dispLinea = line.sku && line.zona ? getStockEnZona(line.sku, line.zona) : 0;
+    const cantNum = parseFloat(line.cantidad || '0');
+    const excede = cantNum > 0 && cantNum > dispLinea;
+
+    return `
+      <div class="basket-line">
+        <button class="del-x" onclick="rvQuitarLinea(${idx})" title="Quitar">✕</button>
+        <div class="head">Producto ${idx + 1}</div>
+        <div class="field">
+          <select onchange="onRvSkuChange(${idx}, this.value)">
+            <option value="">-- elegir producto --</option>
+            ${prodElegibles.length === 0 ? '<option disabled>No hay productos con stock</option>' : ''}
+            ${prodOpts}
+          </select>
+        </div>
+        ${line.sku ? `
+          <div class="field-row">
+            <div class="field">
+              <label>Zona origen</label>
+              <select onchange="onRvZonaChange(${idx}, this.value)">
+                ${zonasConStock.length ? zonaOpts : '<option value="">Sin stock en ningún galpón</option>'}
+              </select>
+            </div>
+            <div class="field">
+              <label>Cantidad${prod ? ' (' + attrEsc(prod.Unidad || '') + ')' : ''}</label>
+              <input type="number" step="0.01" inputmode="decimal" value="${attrEsc(line.cantidad)}" oninput="onRvCantChange(${idx}, this.value)">
+            </div>
+          </div>
+          ${excede ? `<div class="alert alert-err" style="margin:4px 0 0;">⚠ Excede lo disponible (${dispLinea} ${prod ? attrEsc(prod.Unidad || '') : ''})</div>` : ''}
+        ` : ''}
+      </div>`;
+  }).join('');
+
+  validarReservaBasket();
+}
+
+function validarReservaBasket() {
+  const btn = document.getElementById('rv-btn');
+  const sum = document.getElementById('rv-summary');
+  if (!btn) return;
+  let anyLineOk = false, anyBad = false;
+  const acc = {};
+  for (const l of STATE.reservaBasket) {
+    const cant = parseFloat(l.cantidad || '0');
+    if (!l.sku || !l.zona || !(cant > 0)) continue;
+    const key = l.sku + '||' + l.zona;
+    acc[key] = (acc[key] || 0) + cant;
+    anyLineOk = true;
+  }
+  for (const key of Object.keys(acc)) {
+    const [sku, zona] = key.split('||');
+    if (acc[key] > getStockEnZona(sku, zona)) anyBad = true;
+  }
+  btn.disabled = !anyLineOk || anyBad;
+  if (sum) {
+    const n = Object.keys(acc).length;
+    sum.textContent = n ? `${n} ${n === 1 ? 'producto listo' : 'productos listos'} para reservar` : '';
+  }
+}
+
+async function submitReservaMasiva() {
+  const obra = document.getElementById('rv-obra').value;
+  const notas = document.getElementById('rv-notas').value;
+  if (!obra) { document.getElementById('mov-msg').innerHTML = '<div class="alert alert-err">Elegí una obra</div>'; return; }
+
+  const lineas = STATE.reservaBasket.filter(l => {
+    const c = parseFloat(l.cantidad || '0');
+    return l.sku && l.zona && c > 0;
+  });
+  if (lineas.length === 0) { document.getElementById('mov-msg').innerHTML = '<div class="alert alert-err">Cargá al menos un producto</div>'; return; }
+
+  document.getElementById('mov-msg').innerHTML = `<div class="alert alert-info">Guardando ${lineas.length} reservas...</div>`;
+
+  let okCount = 0, errs = [];
+  for (const l of lineas) {
+    try {
+      await api('addMovimiento', {
+        tipo: 'Reserva', sku: l.sku, cantidad: parseFloat(l.cantidad),
+        zonaOrigen: l.zona, obra,
+        usuario: SESSION ? SESSION.user : '',
+        notas,
+      });
+      okCount++;
+    } catch (err) {
+      errs.push(`${l.sku}: ${err.message}`);
+    }
+  }
+  if (errs.length === 0) {
+    document.getElementById('mov-msg').innerHTML = `<div class="alert alert-ok">${okCount} reservas registradas ✓</div>`;
+    setTimeout(() => { closeModal(); init(); }, 700);
+  } else {
+    document.getElementById('mov-msg').innerHTML =
+      `<div class="alert alert-ok">${okCount} OK</div>` +
+      `<div class="alert alert-err">${errs.length} con error:<br>${errs.map(attrEsc).join('<br>')}</div>`;
+    init();
+  }
+}
+
+// ============== LIBERAR RESERVA MASIVO ==============
+// Cada línea lleva {sku, zona, obra, cantidad}. Las tres primeras se
+// eligen desde las reservas vigentes (STATE.reservasDetalle).
+function openLiberaMasiva(skuPreseleccionado) {
+  STATE.liberaBasket = [];
+  if (skuPreseleccionado) {
+    // Pre-cargo una línea con el producto y, si hay una sola
+    // combinación (zona+obra) de reserva, la uso de default.
+    const reservas = (STATE.reservasDetalle || []).filter(r => r.SKU === skuPreseleccionado);
+    if (reservas.length === 1) {
+      STATE.liberaBasket.push({ sku: skuPreseleccionado, zona: reservas[0].Zona, obra: reservas[0].Obra, cantidad: '' });
+    } else {
+      STATE.liberaBasket.push({ sku: skuPreseleccionado, zona: '', obra: '', cantidad: '' });
+    }
+  }
+  if (STATE.liberaBasket.length === 0) {
+    STATE.liberaBasket.push({ sku: '', zona: '', obra: '', cantidad: '' });
+  }
+
+  openModal(`
+    <h2>↺ Liberar reservas</h2>
+    <div id="mov-msg"></div>
+    <div class="field"><label>Notas (se aplican a todas)</label><textarea id="lr-notas" placeholder="ej: motivo de la liberación"></textarea></div>
+    <h3 style="color:#475569;font-size:15px;margin:10px 0 6px;">🛒 Reservas a liberar</h3>
+    <div id="lr-basket"></div>
+    <button class="add-line-btn" onclick="lrAgregarLinea()">+ Agregar otra reserva</button>
+    <div class="hint" id="lr-summary" style="text-align:right;"></div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-purple" id="lr-btn" onclick="submitLiberaMasiva()">Liberar todo</button>
+    </div>
+  `);
+  renderLiberaBasket();
+}
+
+function lrAgregarLinea() { STATE.liberaBasket.push({ sku: '', zona: '', obra: '', cantidad: '' }); renderLiberaBasket(); }
+function lrQuitarLinea(idx) {
+  STATE.liberaBasket.splice(idx, 1);
+  if (STATE.liberaBasket.length === 0) lrAgregarLinea();
+  renderLiberaBasket();
+}
+function onLrSkuChange(idx, value) {
+  STATE.liberaBasket[idx].sku = value;
+  // Si al cambiar el SKU la zona actual ya no tiene reserva, la limpio
+  const zonas = zonasConReserva(value);
+  if (!zonas.find(z => z.Codigo === STATE.liberaBasket[idx].zona)) {
+    // Si hay una sola zona con reserva, la elijo; si hay una sola combinación zona+obra, las dos
+    if (zonas.length === 1) STATE.liberaBasket[idx].zona = zonas[0].Codigo;
+    else STATE.liberaBasket[idx].zona = '';
+    STATE.liberaBasket[idx].obra = '';
+  }
+  const obras = obrasConReserva(value, STATE.liberaBasket[idx].zona);
+  if (obras.length === 1) STATE.liberaBasket[idx].obra = obras[0].Codigo;
+  renderLiberaBasket();
+}
+function onLrZonaChange(idx, value) {
+  STATE.liberaBasket[idx].zona = value;
+  const obras = obrasConReserva(STATE.liberaBasket[idx].sku, value);
+  if (!obras.find(o => o.Codigo === STATE.liberaBasket[idx].obra)) {
+    STATE.liberaBasket[idx].obra = obras.length === 1 ? obras[0].Codigo : '';
+  }
+  renderLiberaBasket();
+}
+function onLrObraChange(idx, value) { STATE.liberaBasket[idx].obra = value; renderLiberaBasket(); }
+function onLrCantChange(idx, value) { STATE.liberaBasket[idx].cantidad = value; validarLiberaBasket(); }
+
+function renderLiberaBasket() {
+  const c = document.getElementById('lr-basket');
+  if (!c) return;
+  const prodElegibles = productosConReserva();
+
+  c.innerHTML = STATE.liberaBasket.map((line, idx) => {
+    const prod = STATE.productos.find(p => p.SKU === line.sku);
+    const zonas = line.sku ? zonasConReserva(line.sku) : [];
+    const obras = (line.sku && line.zona) ? obrasConReserva(line.sku, line.zona) : [];
+
+    const prodOpts = prodElegibles.map(p =>
+      `<option value="${attrEsc(p.SKU)}" ${line.sku === p.SKU ? 'selected' : ''}>${attrEsc(p.SKU)} — ${attrEsc(p.Nombre)}</option>`
+    ).join('');
+
+    const zonaOpts = zonas.map(z => {
+      // cantidad total reservada en esa zona para el SKU (sumando obras)
+      const vig = (STATE.reservasDetalle || [])
+        .filter(r => r.SKU === line.sku && r.Zona === z.Codigo)
+        .reduce((a, r) => a + Number(r.Cantidad || 0), 0);
+      return `<option value="${attrEsc(z.Codigo)}" ${line.zona === z.Codigo ? 'selected' : ''}>${attrEsc(z.Nombre)} (res: ${vig})</option>`;
+    }).join('');
+
+    const obraOpts = obras.map(o => {
+      const vig = reservaVigente(line.sku, line.zona, o.Codigo);
+      return `<option value="${attrEsc(o.Codigo)}" ${line.obra === o.Codigo ? 'selected' : ''}>${attrEsc(o.Codigo)} — ${attrEsc(o.Nombre)} (res: ${vig})</option>`;
+    }).join('');
+
+    const vigLinea = (line.sku && line.zona && line.obra) ? reservaVigente(line.sku, line.zona, line.obra) : 0;
+    const cantNum = parseFloat(line.cantidad || '0');
+    const excede = cantNum > 0 && cantNum > vigLinea;
+
+    return `
+      <div class="basket-line">
+        <button class="del-x" onclick="lrQuitarLinea(${idx})" title="Quitar">✕</button>
+        <div class="head">Reserva ${idx + 1}</div>
+        <div class="field">
+          <select onchange="onLrSkuChange(${idx}, this.value)">
+            <option value="">-- elegir producto con reserva --</option>
+            ${prodElegibles.length === 0 ? '<option disabled>No hay productos con reservas vigentes</option>' : ''}
+            ${prodOpts}
+          </select>
+        </div>
+        ${line.sku ? `
+          <div class="field-row">
+            <div class="field">
+              <label>Galpón</label>
+              <select onchange="onLrZonaChange(${idx}, this.value)">
+                <option value="">-- elegir --</option>
+                ${zonaOpts || '<option disabled>Sin reservas en ningún galpón</option>'}
+              </select>
+            </div>
+            <div class="field">
+              <label>Obra</label>
+              <select onchange="onLrObraChange(${idx}, this.value)" ${line.zona ? '' : 'disabled'}>
+                <option value="">${line.zona ? '-- elegir --' : 'primero elegí galpón'}</option>
+                ${obraOpts}
+              </select>
+            </div>
+          </div>
+          ${line.obra ? `
+            <div class="field">
+              <label>Cantidad${prod ? ' (' + attrEsc(prod.Unidad || '') + ')' : ''} — vigente: ${vigLinea}</label>
+              <input type="number" step="0.01" inputmode="decimal" value="${attrEsc(line.cantidad)}" oninput="onLrCantChange(${idx}, this.value)" placeholder="Ej: ${vigLinea} para liberar todo">
+            </div>
+            ${excede ? `<div class="alert alert-err" style="margin:4px 0 0;">⚠ Excede la reserva vigente (${vigLinea})</div>` : ''}
+          ` : ''}
+        ` : ''}
+      </div>`;
+  }).join('');
+
+  validarLiberaBasket();
+}
+
+function validarLiberaBasket() {
+  const btn = document.getElementById('lr-btn');
+  const sum = document.getElementById('lr-summary');
+  if (!btn) return;
+  let anyLineOk = false, anyBad = false;
+  const acc = {};
+  for (const l of STATE.liberaBasket) {
+    const cant = parseFloat(l.cantidad || '0');
+    if (!l.sku || !l.zona || !l.obra || !(cant > 0)) continue;
+    const key = l.sku + '||' + l.zona + '||' + l.obra;
+    acc[key] = (acc[key] || 0) + cant;
+    anyLineOk = true;
+  }
+  for (const key of Object.keys(acc)) {
+    const [sku, zona, obra] = key.split('||');
+    if (acc[key] > reservaVigente(sku, zona, obra)) anyBad = true;
+  }
+  btn.disabled = !anyLineOk || anyBad;
+  if (sum) {
+    const n = Object.keys(acc).length;
+    sum.textContent = n ? `${n} ${n === 1 ? 'reserva lista' : 'reservas listas'} para liberar` : '';
+  }
+}
+
+async function submitLiberaMasiva() {
+  const notas = document.getElementById('lr-notas').value;
+
+  const lineas = STATE.liberaBasket.filter(l => {
+    const c = parseFloat(l.cantidad || '0');
+    return l.sku && l.zona && l.obra && c > 0;
+  });
+  if (lineas.length === 0) { document.getElementById('mov-msg').innerHTML = '<div class="alert alert-err">Cargá al menos una reserva</div>'; return; }
+
+  document.getElementById('mov-msg').innerHTML = `<div class="alert alert-info">Liberando ${lineas.length} reservas...</div>`;
+
+  let okCount = 0, errs = [];
+  for (const l of lineas) {
+    try {
+      await api('addMovimiento', {
+        tipo: 'Libera_Reserva', sku: l.sku, cantidad: parseFloat(l.cantidad),
+        zonaOrigen: l.zona, obra: l.obra,
+        usuario: SESSION ? SESSION.user : '',
+        notas,
+      });
+      okCount++;
+    } catch (err) {
+      errs.push(`${l.sku}: ${err.message}`);
+    }
+  }
+  if (errs.length === 0) {
+    document.getElementById('mov-msg').innerHTML = `<div class="alert alert-ok">${okCount} reservas liberadas ✓</div>`;
     setTimeout(() => { closeModal(); init(); }, 700);
   } else {
     document.getElementById('mov-msg').innerHTML =
