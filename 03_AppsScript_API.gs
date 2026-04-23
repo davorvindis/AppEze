@@ -144,50 +144,8 @@ function login(params) {
 
 // ============== LECTURA ==============
 
-// Resuelve una URL de Google Maps (incluyendo links cortos) y devuelve { lat, lng } o null.
-function resolverCoordenadas(url) {
-  if (!url) return null;
-  var s = String(url).trim();
-  if (!s) return null;
-
-  // Si es un link corto, seguir redirects y buscar en el HTML
-  if (s.indexOf('goo.gl') !== -1 || s.indexOf('maps.app') !== -1) {
-    try {
-      var resp = UrlFetchApp.fetch(s, { followRedirects: true, muteHttpExceptions: true });
-      var body = resp.getContentText();
-
-      // 1) Buscar la URL canónica (og:url o link canonical) — tiene las coords reales
-      var canon = body.match(/(?:og:url|rel="canonical")[^>]*content="([^"]+)"/);
-      if (!canon) canon = body.match(/href="(https:\/\/www\.google\.com\/maps\/place\/[^"]+)"/);
-      if (canon && canon[1]) {
-        var cu = canon[1];
-        var cm = cu.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
-        if (cm) return { lat: parseFloat(cm[1]), lng: parseFloat(cm[2]) };
-      }
-
-      // 2) Buscar todos los !3d...!4d... y filtrar el default de EEUU (37.0625,-95.677)
-      var re3d = /!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/g;
-      var match;
-      while ((match = re3d.exec(body)) !== null) {
-        var lat = parseFloat(match[1]);
-        var lng = parseFloat(match[2]);
-        // Saltear el centro default de EEUU
-        if (Math.abs(lat - 37.0625) < 0.01 && Math.abs(lng - (-95.677)) < 0.01) continue;
-        return { lat: lat, lng: lng };
-      }
-
-      // 3) Buscar todos los @lat,lng y filtrar el default
-      var reAt = /@(-?\d+\.\d+),(-?\d+\.\d+)/g;
-      while ((match = reAt.exec(body)) !== null) {
-        var lat2 = parseFloat(match[1]);
-        var lng2 = parseFloat(match[2]);
-        if (Math.abs(lat2 - 37.0625) < 0.01 && Math.abs(lng2 - (-95.677)) < 0.01) continue;
-        return { lat: lat2, lng: lng2 };
-      }
-    } catch (_) {}
-  }
-
-  // Parsear coordenadas de la URL directa (no es link corto)
+// Extrae { lat, lng } de una URL larga de Google Maps, o null.
+function _parsearCoordsDeUrl(s) {
   var m = s.match(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
   if (m) return { lat: parseFloat(m[1]), lng: parseFloat(m[2]) };
   m = s.match(/[?&]q=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
@@ -195,6 +153,47 @@ function resolverCoordenadas(url) {
   m = s.match(/!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/);
   if (m) return { lat: parseFloat(m[1]), lng: parseFloat(m[2]) };
   return null;
+}
+
+// Resuelve una URL de Google Maps (incluyendo links cortos) y devuelve { lat, lng } o null.
+function resolverCoordenadas(url) {
+  if (!url) return null;
+  var s = String(url).trim();
+  if (!s) return null;
+
+  // Si es un link corto, seguir la cadena de redirects manualmente
+  if (s.indexOf('goo.gl') !== -1 || s.indexOf('maps.app') !== -1) {
+    try {
+      var current = s;
+      for (var i = 0; i < 10; i++) {
+        var resp = UrlFetchApp.fetch(current, { followRedirects: false, muteHttpExceptions: true });
+        var code = resp.getResponseCode();
+        var headers = resp.getHeaders();
+        var loc = headers['Location'] || headers['location'] || '';
+
+        // Si hay redirect, revisar si la nueva URL ya tiene coordenadas
+        if (loc && (code === 301 || code === 302 || code === 303 || code === 307)) {
+          var coords = _parsearCoordsDeUrl(loc);
+          if (coords) return coords;
+          current = loc;
+          continue;
+        }
+
+        // Si no hay más redirects, buscar en el HTML de la respuesta final
+        var body = resp.getContentText();
+        // Buscar URL larga de Maps embebida en el HTML
+        var urlMatch = body.match(/https:\/\/www\.google\.com\/maps\/[^"'\s\\]+/);
+        if (urlMatch) {
+          var coords2 = _parsearCoordsDeUrl(urlMatch[0]);
+          if (coords2) return coords2;
+        }
+        break;
+      }
+    } catch (_) {}
+  }
+
+  // URL directa (no es link corto)
+  return _parsearCoordsDeUrl(s);
 }
 
 function getProducts()   { return sheetData(SHEET_PRODUCTOS).filter(p => p.Activo !== 'No'); }
