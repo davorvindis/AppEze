@@ -413,7 +413,45 @@ function ensureDriveRoot() {
   if (!DRIVE_ROOT_FOLDER_ID || DRIVE_ROOT_FOLDER_ID === 'PEGAR_ID_CARPETA_DRIVE_ACA') {
     throw new Error('Configurá DRIVE_ROOT_FOLDER_ID en el Apps Script');
   }
-  return DriveApp.getFolderById(DRIVE_ROOT_FOLDER_ID);
+  try {
+    return DriveApp.getFolderById(DRIVE_ROOT_FOLDER_ID);
+  } catch (err) {
+    throw new Error(
+      'No pude abrir la carpeta de Drive con ID "' + DRIVE_ROOT_FOLDER_ID + '". ' +
+      'Revisá: 1) que la carpeta exista y no esté en papelera; ' +
+      '2) que sea de la misma cuenta Google con la que editás este Apps Script; ' +
+      '3) que el ID esté bien pegado (parte de la URL después de /folders/). ' +
+      'Tip: ejecutá la función crearCarpetaStockGalpones() para crear una automáticamente y obtener el ID. ' +
+      'Error original de Drive: ' + err.message
+    );
+  }
+}
+
+// Helper manual: ejecutá esta función desde el editor de Apps Script si
+// nunca creaste la carpeta raíz o perdiste el ID. Crea "Stock Galpones"
+// en tu Drive, la comparte con "cualquiera con el link (Lector)" y te
+// loguea el ID para que lo pegues en DRIVE_ROOT_FOLDER_ID.
+function crearCarpetaStockGalpones() {
+  // Si ya existe una carpeta con ese nombre en la raíz, la reutilizo.
+  const nombre = 'Stock Galpones';
+  const existing = DriveApp.getRootFolder().getFoldersByName(nombre);
+  let folder;
+  if (existing.hasNext()) {
+    folder = existing.next();
+    Logger.log('Ya existía una carpeta llamada "' + nombre + '". Reutilizando.');
+  } else {
+    folder = DriveApp.createFolder(nombre);
+    Logger.log('Carpeta creada: ' + nombre);
+  }
+  folder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  const id = folder.getId();
+  Logger.log('=====================================================');
+  Logger.log('ID de la carpeta: ' + id);
+  Logger.log('URL: ' + folder.getUrl());
+  Logger.log('Pegá este ID arriba en: const DRIVE_ROOT_FOLDER_ID = \'' + id + '\';');
+  Logger.log('Después guardá e Implementá → Versión nueva.');
+  Logger.log('=====================================================');
+  return id;
 }
 
 function ensureFolder(parent, name) {
