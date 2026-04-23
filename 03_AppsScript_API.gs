@@ -427,6 +427,68 @@ function ensureDriveRoot() {
   }
 }
 
+// Función de diagnóstico: corre varios tests sobre Drive y te dice
+// exactamente dónde falla. Mirá la salida con Ver → Registros.
+function diagnosticoDrive() {
+  const log = [];
+  const push = (t) => { log.push(t); Logger.log(t); };
+
+  push('========== DIAGNÓSTICO DRIVE ==========');
+
+  // Test 1: cuenta efectiva
+  try {
+    const user = Session.getActiveUser().getEmail();
+    push('1) Cuenta activa: ' + (user || '(vacío — probablemente sos un usuario externo al workspace del script)'));
+    const effective = Session.getEffectiveUser().getEmail();
+    push('   Cuenta efectiva (dueña del script): ' + effective);
+  } catch (e) { push('1) ERROR leyendo cuenta: ' + e.message); }
+
+  // Test 2: info básica de Drive (llamada muy simple)
+  try {
+    const used = DriveApp.getStorageUsed();
+    push('2) DriveApp.getStorageUsed(): ' + used + ' bytes — OK, Drive responde.');
+  } catch (e) { push('2) ERROR getStorageUsed: ' + e.message); }
+
+  // Test 3: leer la carpeta raíz
+  try {
+    const root = DriveApp.getRootFolder();
+    push('3) DriveApp.getRootFolder(): ' + root.getName() + ' (ID=' + root.getId() + ') — OK.');
+  } catch (e) { push('3) ERROR getRootFolder: ' + e.message + ' — muy probable que tu Workspace tenga bloqueado el acceso de Apps Script a Drive.'); }
+
+  // Test 4: listar primeras 3 carpetas de la raíz
+  try {
+    const it = DriveApp.getRootFolder().getFolders();
+    let n = 0;
+    while (it.hasNext() && n < 3) { push('4.' + (n+1) + ') Carpeta encontrada: ' + it.next().getName()); n++; }
+    if (n === 0) push('4) Tu raíz de Drive no tiene carpetas (raro pero OK).');
+  } catch (e) { push('4) ERROR listando carpetas: ' + e.message); }
+
+  // Test 5: crear carpeta temporal (lo que falló antes)
+  try {
+    const test = DriveApp.createFolder('__test_stock_' + Date.now());
+    push('5) createFolder OK: ' + test.getName() + ' (ID=' + test.getId() + '). La borro.');
+    test.setTrashed(true);
+  } catch (e) { push('5) ERROR createFolder: ' + e.message); }
+
+  // Test 6: ¿se puede abrir el ID que tenés guardado?
+  try {
+    if (!DRIVE_ROOT_FOLDER_ID) push('6) DRIVE_ROOT_FOLDER_ID está vacío.');
+    else {
+      const f = DriveApp.getFolderById(DRIVE_ROOT_FOLDER_ID);
+      push('6) getFolderById("' + DRIVE_ROOT_FOLDER_ID + '") OK: ' + f.getName());
+    }
+  } catch (e) { push('6) ERROR getFolderById: ' + e.message); }
+
+  push('========== FIN DIAGNÓSTICO ==========');
+  push('Si 2/3/4/5 dan error, tu Workspace (@tabacaleraespert.com) probablemente tiene');
+  push('bloqueado el acceso de Apps Script a Drive. Opciones:');
+  push(' - Pedirle al admin de Workspace que habilite Drive para Apps Script.');
+  push(' - Usar una cuenta personal de Gmail para el Apps Script.');
+  push(' - Alternativa sin Drive: guardar las fotos como enlaces externos (te puedo implementar).');
+
+  return log.join('\n');
+}
+
 // Helper manual: ejecutá esta función desde el editor de Apps Script si
 // nunca creaste la carpeta raíz o perdiste el ID. Crea "Stock Galpones"
 // en tu Drive, la comparte con "cualquiera con el link (Lector)" y te
