@@ -175,6 +175,14 @@
   .field .row-with-btn button { background:var(--accent); color:#fff; border:none; border-radius:8px; padding:0 14px; font-weight:600; cursor:pointer; font-size:13px; }
   .field-row { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
   .toggle-row { display:flex; align-items:center; gap:8px; background:#F4F6F9; padding:10px 12px; border-radius:8px; margin-bottom:8px; }
+  .combo { position:relative; }
+  .combo input[type="text"] { width:100%; box-sizing:border-box; }
+  .combo-list { display:none; position:absolute; left:0; right:0; top:calc(100% + 4px); background:var(--card); border:1px solid var(--border); border-radius:8px; max-height:260px; overflow-y:auto; z-index:500; box-shadow:0 8px 20px rgba(0,0,0,.14); }
+  .combo-list.open { display:block; }
+  .combo-item { padding:10px 12px; cursor:pointer; font-size:14px; border-bottom:1px solid var(--border); }
+  .combo-item:last-child { border-bottom:none; }
+  .combo-item:hover, .combo-item:active { background:var(--bg); }
+  .combo-empty { padding:12px; color:var(--muted); text-align:center; font-size:13px; }
   .toggle-row input[type=checkbox] { width:18px; height:18px; }
   .toggle-row label { margin:0; font-size:14px; color:var(--text); flex:1; cursor:pointer; }
   .btn-row { display:flex; gap:8px; margin-top:8px; }
@@ -359,7 +367,9 @@ function attrEsc(s) {
     .replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 function jsStr(s) {
-  return "'" + String(s == null ? '' : s).replace(/\\/g,'\\\\').replace(/'/g,"\\'") + "'";
+  // JSON.stringify produce comillas dobles JS-válidas. attrEsc convierte " → &quot;
+  // para que sobreviva dentro de onclick='...' sin cerrar el atributo.
+  return attrEsc(JSON.stringify(String(s == null ? '' : s)));
 }
 function initialsOf(name) {
   const t = (name || '?').trim();
@@ -371,6 +381,7 @@ function initialsOf(name) {
 // ============== ESTADO ==============
 let STATE = {
   productos: [], zonas: [], obras: [], categorias: [], stock: [],
+  reservasDetalle: [],  // [{SKU, Zona, Obra, Cantidad}] — solo > 0 (vigentes)
   currentZone: 'TODAS',
   egresoBasket: [],
 };
@@ -403,6 +414,8 @@ function _ensureSaving() {
     .saving-box{background:#fff;padding:22px 28px;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.35);display:flex;align-items:center;gap:14px;font-weight:700;color:var(--primary);font-size:16px}
     .saving-spin{width:22px;height:22px;border:3px solid #E3E7ED;border-top-color:var(--primary);border-radius:50%;animation:spin .8s linear infinite}
     @keyframes spin{to{transform:rotate(360deg)}}
+    .dots::after{content:'';animation:dots 1.2s steps(4,end) infinite}
+    @keyframes dots{0%{content:''}25%{content:'.'}50%{content:'..'}75%{content:'...'}}
   `;
   document.head.appendChild(css);
   const el = document.createElement('div');
@@ -410,7 +423,7 @@ function _ensureSaving() {
   el.innerHTML = '<div class="saving-box"><div class="saving-spin"></div><span id="saving-msg">Guardando...</span></div>';
   document.body.appendChild(el);
 }
-function showSaving(msg){_ensureSaving();document.getElementById('saving-msg').textContent=msg||'Guardando...';document.getElementById('saving-overlay').classList.add('show');}
+function showSaving(msg){_ensureSaving();const el=document.getElementById('saving-msg');const txt=msg||'Guardando';el.innerHTML='<span>'+attrEsc(txt)+'</span><span class="dots"></span>';document.getElementById('saving-overlay').classList.add('show');}
 function hideSaving(){const el=document.getElementById('saving-overlay');if(el)el.classList.remove('show');}
 
 // Actions que son de escritura (muestran overlay)
@@ -418,7 +431,7 @@ const _WRITE_ACTIONS = ['addMovimiento','addProducto','addObra','addZona','uploa
 
 async function api(action, extra = {}, method = 'GET') {
   const isWrite = _WRITE_ACTIONS.indexOf(action) !== -1;
-  if (isWrite) showSaving(action === 'uploadFoto' ? 'Subiendo foto...' : action === 'generarQR' ? 'Generando QR...' : 'Guardando...');
+  if (isWrite) showSaving(action === 'login' ? 'Conectando' : action === 'uploadFoto' ? 'Subiendo foto' : action === 'generarQR' ? 'Generando QR' : 'Guardando');
   try {
     if (method === 'POST') {
       const body = JSON.stringify({ action, token: API_TOKEN, ...extra });
@@ -438,15 +451,24 @@ async function api(action, extra = {}, method = 'GET') {
   }
 }
 async function apiPostJSON(action, extra = {}) {
-  const body = JSON.stringify({ action, token: API_TOKEN, ...extra });
-  const res = await fetch(API_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json;charset=utf-8' },
-    body, redirect: 'follow',
-  });
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error);
-  return data.data;
+  // IMPORTANTE: usamos text/plain (no application/json) para evitar el
+  // preflight CORS OPTIONS. Apps Script no responde OPTIONS y lo rechaza.
+  // El backend parsea el JSON del body igual, mirando postData.contents.
+  const isWrite = _WRITE_ACTIONS.indexOf(action) !== -1;
+  if (isWrite) showSaving(action === 'login' ? 'Conectando' : action === 'uploadFoto' ? 'Subiendo foto' : action === 'generarQR' ? 'Generando QR' : 'Guardando');
+  try {
+    const body = JSON.stringify({ action, token: API_TOKEN, ...extra });
+    const res = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body, redirect: 'follow',
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error);
+    return data.data;
+  } finally {
+    if (isWrite) hideSaving();
+  }
 }
 
 // ============== LOGIN FLOW ==============
@@ -568,18 +590,20 @@ async function enterApp() {
 
 async function init() {
   try {
-    const [productos, zonas, obras, categorias, stock] = await Promise.all([
+    const [productos, zonas, obras, categorias, stock, reservasDetalle] = await Promise.all([
       api('getProducts'),
       api('getZones'),
       api('getObras'),
       api('getCategorias'),
       api('getStock'),
+      api('getReservasDetalle').catch(() => []),  // si el backend viejo no lo tiene, no rompe
     ]);
     STATE.productos = productos;
     STATE.zonas = zonas;
     STATE.obras = obras;
     STATE.categorias = categorias;
     STATE.stock = stock;
+    STATE.reservasDetalle = reservasDetalle || [];
     renderZonas();
     renderCategorias();
     renderStock();
@@ -607,6 +631,105 @@ function productosConStock() {
     return r && Number(r.Disponible || 0) > 0;
   });
 }
+function productosConReserva() {
+  // Preferimos el detalle de reservas (vigentes) para evitar mostrar
+  // productos que quedaron con "Reservado" desfasado en Stock_Actual.
+  if (STATE.reservasDetalle && STATE.reservasDetalle.length) {
+    const skus = new Set(STATE.reservasDetalle.map(r => r.SKU));
+    return STATE.productos.filter(p => skus.has(p.SKU));
+  }
+  return STATE.productos.filter(p => {
+    const r = getStockRow(p.SKU);
+    return r && Number(r.Reservado || 0) > 0;
+  });
+}
+
+// Zonas donde hay reserva vigente del SKU dado.
+function zonasConReserva(sku) {
+  if (!sku || !STATE.reservasDetalle) return [];
+  const cods = new Set(STATE.reservasDetalle.filter(r => r.SKU === sku).map(r => r.Zona));
+  return STATE.zonas.filter(z => cods.has(z.Codigo));
+}
+
+// Obras donde hay reserva vigente del SKU en la zona dada (si zona vacía, todas).
+function obrasConReserva(sku, zona) {
+  if (!sku || !STATE.reservasDetalle) return [];
+  const obras = new Set(
+    STATE.reservasDetalle
+      .filter(r => r.SKU === sku && (!zona || r.Zona === zona))
+      .map(r => r.Obra)
+  );
+  return STATE.obras.filter(o => obras.has(o.Codigo));
+}
+
+// Cantidad reservada vigente para SKU + zona + obra (0 si no hay).
+function reservaVigente(sku, zona, obra) {
+  if (!STATE.reservasDetalle) return 0;
+  const row = STATE.reservasDetalle.find(r => r.SKU === sku && r.Zona === zona && r.Obra === obra);
+  return row ? Number(row.Cantidad || 0) : 0;
+}
+
+// ============== COMBOBOX (input + dropdown con búsqueda predictiva) ==============
+window._comboData = {};
+window._comboCallbacks = {};
+
+function comboInit(hiddenId, items, selectedValue, callback) {
+  window._comboData[hiddenId] = items || [];
+  window._comboCallbacks[hiddenId] = callback || null;
+  const hidden = document.getElementById(hiddenId);
+  const search = document.getElementById(hiddenId + '-search');
+  if (!hidden || !search) return;
+  hidden.value = '';
+  search.value = '';
+  if (selectedValue) {
+    const sel = (items || []).find(it => it.value === selectedValue);
+    if (sel) {
+      hidden.value = sel.value;
+      search.value = sel.label;
+    }
+  }
+}
+
+function comboFilter(hiddenId, text, showAll) {
+  const items = window._comboData[hiddenId] || [];
+  const list = document.getElementById(hiddenId + '-list');
+  const hidden = document.getElementById(hiddenId);
+  if (!list) return;
+  // Si el usuario edita el texto, invalido la selección previa (va a tener que re-elegir)
+  if (!showAll && hidden) hidden.value = '';
+  const t = (text || '').toLowerCase().trim();
+  let filtered = items;
+  if (t) {
+    filtered = items.filter(it => (it.hay || it.label || '').toLowerCase().includes(t));
+  }
+  if (filtered.length === 0) {
+    list.innerHTML = '<div class="combo-empty">Sin resultados</div>';
+  } else {
+    list.innerHTML = filtered.slice(0, 80).map(it =>
+      `<div class="combo-item" onmousedown="event.preventDefault()" onclick='comboSelect(${jsStr(hiddenId)}, ${jsStr(it.value)})'>${attrEsc(it.label)}</div>`
+    ).join('');
+  }
+  list.classList.add('open');
+}
+
+function comboSelect(hiddenId, value) {
+  const items = window._comboData[hiddenId] || [];
+  const sel = items.find(it => it.value === value);
+  const hidden = document.getElementById(hiddenId);
+  const search = document.getElementById(hiddenId + '-search');
+  const list = document.getElementById(hiddenId + '-list');
+  if (hidden) hidden.value = value;
+  if (search) search.value = sel ? sel.label : value;
+  if (list) list.classList.remove('open');
+  const cb = window._comboCallbacks[hiddenId];
+  if (cb) cb();
+}
+
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.combo')) {
+    document.querySelectorAll('.combo-list.open').forEach(l => l.classList.remove('open'));
+  }
+});
 
 // ============== RENDER: STOCK ==============
 function renderZonas() {
@@ -699,9 +822,16 @@ function showDetalle(sku) {
       <button class="btn btn-secondary" onclick='openMovimiento("Libera_Reserva", ${jsStr(sku)})'>Liberar</button>
     </div>
     <div class="btn-row" style="margin-top:8px;">
-      <button class="btn btn-accent" onclick='openSubirFoto(${jsStr(sku)})'>📷 Foto</button>
-      <button class="btn btn-primary" onclick='generarQRProducto(${jsStr(sku)})'>🔗 QR</button>
+      <button class="btn btn-accent" onclick='openSubirFoto(${jsStr(sku)})'>${prod.Foto_URL ? '📷 Cambiar foto' : '📷 Foto'}</button>
+      ${prod.QR_URL ? '' : `<button class="btn btn-primary" onclick='generarQRProducto(${jsStr(sku)})'>🔗 QR</button>`}
     </div>
+    ${prod.QR_URL ? `
+      <div class="alert alert-ok" style="margin-top:8px;">QR ya generado ✓</div>
+      <img src="${attrEsc(prod.QR_URL)}" class="qr-preview" alt="QR ${attrEsc(sku)}" onerror="this.style.display='none'">
+      <div class="btn-row">
+        <a class="btn btn-secondary" href="${attrEsc(prod.QR_URL)}" target="_blank" style="text-align:center;text-decoration:none;line-height:1;padding:14px 10px;">Ver en Drive</a>
+      </div>
+    ` : ''}
     <div id="qr-container"></div>
     <div class="btn-row" style="margin-top:12px;">
       <button class="btn btn-secondary" onclick="closeModal()">Cerrar</button>
@@ -713,11 +843,11 @@ function showDetalle(sku) {
 function openMovimiento(tipo, skuPreseleccionado) {
   if (tipo === 'Egreso') { openEgresoMasivo(skuPreseleccionado); return; }
 
-  const filtrarPorStock = (tipo === 'Traslado' || tipo === 'Reserva' || tipo === 'Libera_Reserva');
-  const productosList = filtrarPorStock ? productosConStock() : STATE.productos;
-
-  const productoOptions = productosList.map(p =>
-    `<option value="${attrEsc(p.SKU)}" ${p.SKU === skuPreseleccionado ? 'selected' : ''}>${attrEsc(p.SKU)} — ${attrEsc(p.Nombre)}</option>`).join('');
+  // Filtrado según tipo: para Libera_Reserva solo los que tienen reserva (no stock)
+  let productosList;
+  if (tipo === 'Libera_Reserva') productosList = productosConReserva();
+  else if (tipo === 'Traslado' || tipo === 'Reserva') productosList = productosConStock();
+  else productosList = STATE.productos;
   const zonaOptions = STATE.zonas.map(z => `<option value="${attrEsc(z.Codigo)}">${attrEsc(z.Nombre)}</option>`).join('');
   const obraOptions = STATE.obras.filter(o => o.Estado !== 'Finalizada')
     .map(o => `<option value="${attrEsc(o.Codigo)}">${attrEsc(o.Codigo)} — ${attrEsc(o.Nombre)}</option>`).join('');
@@ -735,12 +865,17 @@ function openMovimiento(tipo, skuPreseleccionado) {
 
   let formFields = `
     <div class="field">
-      <label>Producto</label>
+      <label>Producto ${tipo === 'Libera_Reserva' ? '(con reserva vigente)' : ''}</label>
       <div class="row-with-btn">
-        <select id="f-sku" onchange="onSkuChangeMov('${tipo}')"><option value="">-- elegir --</option>${productoOptions}</select>
+        <div class="combo" style="flex:1;position:relative;">
+          <input type="hidden" id="f-sku">
+          <input type="text" id="f-sku-search" placeholder="Buscá por nombre o SKU..." autocomplete="off"
+                 oninput="comboFilter('f-sku', this.value)" onfocus="comboFilter('f-sku', '', true)">
+          <div id="f-sku-list" class="combo-list"></div>
+        </div>
         <button type="button" onclick="openNuevoProducto()">+ Nuevo</button>
       </div>
-      <div class="hint" id="f-sku-hint"></div>
+      <div class="hint" id="f-sku-hint">${productosList.length === 0 ? (tipo === 'Libera_Reserva' ? 'No hay productos con reservas vigentes.' : 'Sin productos disponibles.') : productosList.length + ' productos disponibles'}</div>
     </div>
     ${packBlock}
     <div class="field">
@@ -756,9 +891,9 @@ function openMovimiento(tipo, skuPreseleccionado) {
     formFields += `
       <div class="field"><label>Zona origen</label><select id="f-origen" onchange="validarCantMov('Traslado')"><option value="">-- elegir --</option>${zonaOptions}</select></div>
       <div class="field"><label>Zona destino</label><select id="f-dest"><option value="">-- elegir --</option>${zonaOptions}</select></div>`;
-  } else if (tipo === 'Reserva' || tipo === 'Libera_Reserva') {
+  } else if (tipo === 'Reserva') {
     formFields += `
-      <div class="field"><label>Zona origen</label><select id="f-origen" onchange="validarCantMov('${tipo}')"><option value="">-- elegir --</option>${zonaOptions}</select></div>
+      <div class="field"><label>Zona origen</label><select id="f-origen" onchange="validarCantMov('Reserva')"><option value="">-- elegir --</option>${zonaOptions}</select></div>
       <div class="field">
         <label>Obra</label>
         <div class="row-with-btn">
@@ -766,6 +901,13 @@ function openMovimiento(tipo, skuPreseleccionado) {
           <button type="button" onclick="openNuevaObra()">+ Nueva</button>
         </div>
       </div>`;
+  } else if (tipo === 'Libera_Reserva') {
+    // Arrancan vacíos — se rellenan en onSkuChangeMov/onZonaChangeLiberar
+    // mostrando SÓLO zonas/obras con reserva vigente del SKU elegido.
+    formFields += `
+      <div class="field"><label>Zona origen (con reserva)</label><select id="f-origen" onchange="onZonaChangeLiberar()"><option value="">-- primero elegí un producto --</option></select></div>
+      <div class="field"><label>Obra (con reserva)</label><select id="f-obra"><option value="">-- primero elegí zona --</option></select></div>
+      <div class="hint" id="f-reserva-hint"></div>`;
   } else if (tipo === 'Ajuste') {
     formFields += `<div class="field"><label>Zona</label><select id="f-origen"><option value="">-- elegir --</option>${zonaOptions}</select></div>
                    <div class="field"><label>Motivo</label><select id="f-motivo">
@@ -788,6 +930,13 @@ function openMovimiento(tipo, skuPreseleccionado) {
       <button class="btn btn-primary" id="btn-guardar-mov" onclick="submitMovimiento('${tipo}')">Guardar</button>
     </div>
   `);
+
+  // Inicializo el combobox con los productos filtrados según tipo
+  comboInit('f-sku', productosList.map(p => ({
+    value: p.SKU,
+    label: `${p.SKU} — ${p.Nombre}`,
+    hay: p.Nombre + ' ' + p.SKU + ' ' + (p.Categoria||'') + ' ' + (p.Subcategoria||''),
+  })), skuPreseleccionado, () => onSkuChangeMov(tipo));
 
   if (skuPreseleccionado) onSkuChangeMov(tipo);
 }
@@ -819,8 +968,50 @@ function onSkuChangeMov(tipo) {
     if (chk) chk.checked = false;
   }
 
+  // En Liberar_Reserva: rellenar zonas/obras SÓLO con las que tienen reserva vigente.
+  if (tipo === 'Libera_Reserva') {
+    const zonasOk = zonasConReserva(sku);
+    const selZ = document.getElementById('f-origen');
+    if (selZ) {
+      selZ.innerHTML = '<option value="">-- elegir --</option>' +
+        zonasOk.map(z => `<option value="${attrEsc(z.Codigo)}">${attrEsc(z.Nombre)}</option>`).join('');
+    }
+    const selO = document.getElementById('f-obra');
+    if (selO) selO.innerHTML = '<option value="">-- primero elegí zona --</option>';
+    const rh = document.getElementById('f-reserva-hint');
+    if (rh) rh.innerHTML = zonasOk.length
+      ? `<span style="color:var(--muted)">Hay reservas en ${zonasOk.length} galp${zonasOk.length === 1 ? 'ón' : 'ones'}.</span>`
+      : '<span style="color:var(--warn)">Este producto no tiene reservas vigentes en ningún galpón.</span>';
+  }
+
   actualizarPackIngreso();
   validarCantMov(tipo);
+}
+
+function onZonaChangeLiberar() {
+  const sku = document.getElementById('f-sku').value;
+  const zona = document.getElementById('f-origen').value;
+  const selO = document.getElementById('f-obra');
+  const rh = document.getElementById('f-reserva-hint');
+  if (!sku || !zona) {
+    if (selO) selO.innerHTML = '<option value="">-- primero elegí zona --</option>';
+    return;
+  }
+  const obras = obrasConReserva(sku, zona);
+  if (selO) {
+    selO.innerHTML = '<option value="">-- elegir --</option>' +
+      obras.map(o => `<option value="${attrEsc(o.Codigo)}">${attrEsc(o.Codigo)} — ${attrEsc(o.Nombre)}</option>`).join('');
+    selO.onchange = () => {
+      const obra = selO.value;
+      if (!obra) { if (rh) rh.innerHTML = ''; return; }
+      const vig = reservaVigente(sku, zona, obra);
+      const prod = STATE.productos.find(p => p.SKU === sku) || {};
+      if (rh) rh.innerHTML = `<span style="color:var(--purple)">Reserva vigente en esta combinación: <strong>${vig}</strong> ${attrEsc(prod.Unidad || '')}</span>`;
+    };
+  }
+  if (rh) rh.innerHTML = obras.length
+    ? '<span style="color:var(--muted)">Elegí la obra.</span>'
+    : '<span style="color:var(--warn)">No hay obras con reserva vigente en esta zona.</span>';
 }
 
 function actualizarPackIngreso() {
@@ -844,13 +1035,27 @@ function validarCantMov(tipo) {
   if (!hint || !btn) return;
   hint.innerHTML = '';
   btn.disabled = false;
-  if (tipo !== 'Traslado' && tipo !== 'Reserva') return;
+  if (tipo !== 'Traslado' && tipo !== 'Reserva' && tipo !== 'Libera_Reserva') return;
 
   const sku = document.getElementById('f-sku').value;
   const zo = document.getElementById('f-origen') ? document.getElementById('f-origen').value : '';
   if (!sku || !zo) return;
-  const disp = getStockEnZona(sku, zo);
+
   const cant = parseFloat(document.getElementById('f-cant').value || '0');
+
+  if (tipo === 'Libera_Reserva') {
+    const obra = document.getElementById('f-obra') ? document.getElementById('f-obra').value : '';
+    if (!obra) return;
+    const vig = reservaVigente(sku, zo, obra);
+    hint.innerHTML = `<span style="color:var(--muted)">Reserva vigente: <strong>${vig}</strong></span>`;
+    if (cant > 0 && cant > vig) {
+      hint.innerHTML = `<span style="color:var(--warn)">⚠ Excede la reserva vigente (${vig}). No vas a poder guardar.</span>`;
+      btn.disabled = true;
+    }
+    return;
+  }
+
+  const disp = getStockEnZona(sku, zo);
   hint.innerHTML = `<span style="color:var(--muted)">Disponible en esa zona: <strong>${disp}</strong></span>`;
   if (cant > 0 && cant > disp) {
     hint.innerHTML = `<span style="color:var(--warn)">⚠ Excede lo disponible (${disp}). No vas a poder guardar.</span>`;
@@ -1295,28 +1500,62 @@ function openSubirFoto(sku) {
   const prod = STATE.productos.find(p => p.SKU === sku);
   if (!prod) return;
   const nombreSafe = (prod.Nombre || '').substring(0,30).replace(/\s+/g,'_');
+  const tieneFoto = !!prod.Foto_URL;
   openModal(`
-    <h2>📷 Foto de ${attrEsc(prod.Nombre)}</h2>
+    <h2>📷 ${tieneFoto ? 'Cambiar foto' : 'Foto'} de ${attrEsc(prod.Nombre)}</h2>
     <div id="foto-msg"></div>
-    ${prod.Foto_URL ? `<img src="${attrEsc(prod.Foto_URL)}" class="foto-preview" id="foto-actual" onerror="this.src=window.NO_FOTO">` : ''}
-    <div class="field">
-      <label>Elegí o sacá una foto</label>
-      <input type="file" id="f-foto" accept="image/*" capture="environment">
+    ${tieneFoto ? `
+      <div class="hint" style="margin-bottom:6px;">Foto actual:</div>
+      <img src="${attrEsc(prod.Foto_URL)}" class="foto-preview" id="foto-actual" onerror="this.src=window.NO_FOTO">
+    ` : ''}
+    <div class="hint" style="margin-top:10px;margin-bottom:6px;">Previsualización de la nueva foto:</div>
+    <img id="foto-preview-nueva" class="foto-preview" src="${window.NO_FOTO}" style="opacity:.55;">
+    <div class="field" style="margin-top:10px;">
+      <label>Elegí cómo querés cargar la foto</label>
+      <div class="btn-row">
+        <button type="button" class="btn btn-secondary" onclick="document.getElementById('f-foto-galeria').click()">🖼 Desde galería</button>
+        <button type="button" class="btn btn-accent" onclick="document.getElementById('f-foto-camara').click()">📸 Sacar foto</button>
+      </div>
+      <input type="file" id="f-foto-galeria" accept="image/*" style="display:none;" onchange="previewFotoNueva(this)">
+      <!-- Sin 'accept' explícito para que el navegador NO muestre el picker
+           "Galería o Cámara" en iOS — con sólo capture="environment" abre la
+           cámara trasera directo. En Android Chrome también abre la cámara. -->
+      <input type="file" id="f-foto-camara" capture="environment" style="display:none;" onchange="previewFotoNueva(this)">
     </div>
-    <div class="hint">La foto se guarda en Drive / Fotos / ${attrEsc(prod.Categoria || 'Varios')} / con el nombre ${attrEsc(sku)}_${attrEsc(nombreSafe)}.jpg</div>
+    <div class="hint">Se guarda en Drive / Fotos / ${attrEsc(prod.Categoria || 'Varios')} / ${attrEsc(sku)}_${attrEsc(nombreSafe)}.jpg</div>
     <div class="btn-row">
       <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
-      <button class="btn btn-primary" onclick='submitFoto(${jsStr(sku)})'>Subir</button>
+      <button class="btn btn-primary" id="btn-subir-foto" onclick='submitFoto(${jsStr(sku)})' disabled>Subir</button>
     </div>
   `);
+}
+
+function previewFotoNueva(input) {
+  if (!input.files || input.files.length === 0) return;
+  const file = input.files[0];
+  // Limpio el otro input para no tener 2 archivos a la vez
+  const otroId = input.id === 'f-foto-galeria' ? 'f-foto-camara' : 'f-foto-galeria';
+  const otro = document.getElementById(otroId);
+  if (otro) otro.value = '';
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const img = document.getElementById('foto-preview-nueva');
+    if (img) { img.src = e.target.result; img.style.opacity = '1'; }
+  };
+  reader.readAsDataURL(file);
+  const btn = document.getElementById('btn-subir-foto');
+  if (btn) btn.disabled = false;
 }
 
 async function submitFoto(sku) {
   try {
     const prod = STATE.productos.find(p => p.SKU === sku);
-    const input = document.getElementById('f-foto');
-    if (!input.files || input.files.length === 0) throw new Error('Elegí una foto');
-    const file = input.files[0];
+    const galeria = document.getElementById('f-foto-galeria');
+    const camara = document.getElementById('f-foto-camara');
+    let file = null;
+    if (galeria && galeria.files && galeria.files.length > 0) file = galeria.files[0];
+    else if (camara && camara.files && camara.files.length > 0) file = camara.files[0];
+    if (!file) throw new Error('Elegí una foto desde la galería o sacá una con la cámara');
     document.getElementById('foto-msg').innerHTML = '<div class="alert alert-info">Subiendo... puede tardar unos segundos.</div>';
     const base64 = await fileToBase64(file);
     await apiPostJSON('uploadFoto', {
@@ -1345,14 +1584,35 @@ function fileToBase64(file) {
 }
 
 // ============== QR ==============
+// Genero el PNG del QR acá en el navegador (api.qrserver.com), lo convierto
+// a base64 y se lo mando al backend. Así el Apps Script no necesita el
+// permiso de UrlFetchApp (scope external_request).
 async function generarQRProducto(sku) {
   const prod = STATE.productos.find(p => p.SKU === sku);
   if (!prod) return;
   const container = document.getElementById('qr-container');
   container.innerHTML = '<div class="alert alert-info">Generando QR...</div>';
   try {
-    const res = await api('generarQR', {
+    // 1) Armo el destino del QR (la URL pública del Apps Script con el SKU).
+    //    Como desde el HTML no conocemos la URL del /exec, mando un flag y
+    //    el backend arma el qrData por su cuenta; mientras tanto uso un
+    //    placeholder con el SKU para pintar un QR de previsualización.
+    //    Para que el QR *apunte* al infoProducto real, piso los datos con
+    //    una segunda llamada. Simpler: uso la API_URL (es la del /exec).
+    const qrDestino = `${API_URL}?action=infoProducto&sku=${encodeURIComponent(sku)}`;
+    const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(qrDestino)}&size=400x400&margin=20&format=png`;
+
+    // 2) Bajo el PNG con fetch → blob → base64 (sin el prefijo data:...;base64,)
+    const resp = await fetch(qrApiUrl);
+    if (!resp.ok) throw new Error('No se pudo generar el QR (api.qrserver.com)');
+    const blob = await resp.blob();
+    const base64 = await blobToBase64(blob);
+
+    // 3) Mando el base64 al backend para que lo guarde en Drive y en la
+    //    columna QR_URL del producto.
+    const res = await apiPostJSON('generarQR', {
       sku, nombre: prod.Nombre, categoria: prod.Categoria || 'Varios',
+      base64,
     });
     container.innerHTML = `
       <div class="alert alert-ok">QR generado y guardado en Drive ✓</div>
@@ -1362,9 +1622,24 @@ async function generarQRProducto(sku) {
         <a class="btn btn-primary" href="${attrEsc(res.url)}" target="_blank" style="text-align:center;text-decoration:none;line-height:1;padding:14px 10px;">Ver en Drive</a>
         <a class="btn btn-secondary" href="${attrEsc(res.qrData)}" target="_blank" style="text-align:center;text-decoration:none;line-height:1;padding:14px 10px;">Probar link</a>
       </div>`;
+    // Recargo productos para que el prod.QR_URL quede en STATE y se oculte el botón.
+    await init();
   } catch (err) {
     container.innerHTML = `<div class="alert alert-err">${attrEsc(err.message)}</div>`;
   }
+}
+
+function blobToBase64(blob) {
+  return new Promise((res, rej) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const s = reader.result;
+      const idx = s.indexOf('base64,');
+      res(idx >= 0 ? s.substring(idx + 7) : s);
+    };
+    reader.onerror = rej;
+    reader.readAsDataURL(blob);
+  });
 }
 
 // ============== ZONAS ==============

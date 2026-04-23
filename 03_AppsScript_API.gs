@@ -61,9 +61,14 @@ function doPost(e) { return handle(e); }
 function handle(e) {
   try {
     const params = e.parameter || {};
-    // postData (para subir archivos grandes como base64)
-    if (e.postData && e.postData.type === 'application/json') {
-      Object.assign(params, JSON.parse(e.postData.contents));
+    // postData (para subir archivos grandes como base64).
+    // Mandamos el body como text/plain para evitar el preflight CORS,
+    // así que intentamos parsear JSON siempre que el contents arranque con '{'.
+    if (e.postData && e.postData.contents) {
+      const raw = String(e.postData.contents).trim();
+      if (raw.charAt(0) === '{') {
+        try { Object.assign(params, JSON.parse(raw)); } catch (_) {}
+      }
     }
     if (params.token !== API_TOKEN) return json({ ok: false, error: 'Token inválido' });
 
@@ -79,6 +84,7 @@ function handle(e) {
       case 'getStock':           result = getStock(); break;
       case 'getMovimientos':     result = getMovimientos(parseInt(params.limit || '100')); break;
       case 'getMovimientosObra': result = getMovimientosObra(params.obra); break;
+      case 'getReservasDetalle': result = getReservasDetalle(); break;
       case 'getAlertas':         result = getAlertas(); break;
       case 'addMovimiento':      result = addMovimiento(params); break;
       case 'addProducto':        result = addProducto(params); break;
@@ -159,6 +165,28 @@ function getMovimientos(limit) {
   const data = sheetData(SHEET_MOVIMIENTOS);
   data.reverse();
   return limit ? data.slice(0, limit) : data;
+}
+
+// Reservas netas agrupadas por SKU + Zona_Origen + Obra.
+// Devuelve sólo las combinaciones con cantidad > 0 (o sea, que siguen vigentes).
+// El frontend usa esto para que, al Liberar, solo aparezcan los galpones y
+// obras donde realmente hay algo reservado del producto elegido.
+function getReservasDetalle() {
+  const all = sheetData(SHEET_MOVIMIENTOS);
+  const map = {};
+  all.forEach(m => {
+    if (m.Tipo !== 'Reserva' && m.Tipo !== 'Libera_Reserva') return;
+    const sku = m.SKU;
+    const zona = m.Zona_Origen || m.Zona_Destino || '';
+    const obra = m.Obra || '';
+    if (!sku || !zona || !obra) return;
+    const key = sku + '||' + zona + '||' + obra;
+    if (!map[key]) map[key] = { SKU: sku, Zona: zona, Obra: obra, Cantidad: 0 };
+    const c = Number(m.Cantidad || 0);
+    if (m.Tipo === 'Reserva') map[key].Cantidad += c;
+    else map[key].Cantidad -= c;
+  });
+  return Object.values(map).filter(x => x.Cantidad > 0);
 }
 
 function getMovimientosObra(obra) {
@@ -321,8 +349,8 @@ function addProducto(params) {
     const skus = s.getRange(2, 1, last-1, 1).getValues().flat();
     if (skus.indexOf(sku) !== -1) throw new Error('SKU ya existe: ' + sku);
   }
-  // Columnas: A SKU | B Nombre | C Categoria | D Subcategoria | E Unidad | F Foto_URL | G Stock_Minimo_Total | H Notas | I Activo | J Unidad_Pack | K Cantidad_Por_Pack
-  s.appendRow([sku, nombre, categoria, subcategoria, unidad, fotoUrl, stockMinimo, notas, 'Sí', unidadPack, cantidadPack]);
+  // Columnas: A SKU | B Nombre | C Categoria | D Subcategoria | E Unidad | F Foto_URL | G Stock_Minimo_Total | H Notas | I Activo | J Unidad_Pack | K Cantidad_Por_Pack | L QR_URL
+  s.appendRow([sku, nombre, categoria, subcategoria, unidad, fotoUrl, stockMinimo, notas, 'Sí', unidadPack, cantidadPack, '']);
   SpreadsheetApp.flush();
   return { sku };
 }
@@ -443,19 +471,21 @@ function updateProductoFotoURL(sku, url) {
   }
 }
 
+// NOTA: esta versión NO usa UrlFetchApp.fetch (que requiere el permiso
+// external_request y rompía al llamar desde el script). El HTML genera
+// el PNG contra api.qrserver.com directamente desde el navegador y lo
+// manda acá en base64, igual que uploadFoto. Así el Apps Script sólo
+// necesita permisos de Drive/Sheets.
 function generarQR(params) {
   const sku = (params.sku || '').trim();
   const nombre = (params.nombre || '').trim();
   const categoria = (params.categoria || 'Varios').trim();
+  const base64 = params.base64 || '';
   if (!sku) throw new Error('Falta SKU');
+  if (!base64) throw new Error('Falta imagen del QR (base64)');
 
   const scriptUrl = ScriptApp.getService().getUrl();
   const qrData = `${scriptUrl}?action=infoProducto&sku=${encodeURIComponent(sku)}`;
-
-  const apiUrl = `https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(qrData)}&size=400x400&margin=20`;
-  const resp = UrlFetchApp.fetch(apiUrl, { muteHttpExceptions: true });
-  if (resp.getResponseCode() !== 200) throw new Error('No se pudo generar el QR');
-  const blob = resp.getBlob();
 
   const root = ensureDriveRoot();
   const qrs = ensureFolder(root, 'QRs');
@@ -465,12 +495,34 @@ function generarQR(params) {
   const existing = cat.getFilesByName(fileName);
   while (existing.hasNext()) existing.next().setTrashed(true);
 
-  blob.setName(fileName);
+  const blob = Utilities.newBlob(Utilities.base64Decode(base64), 'image/png', fileName);
   const file = cat.createFile(blob);
   file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
 
   const url = `https://drive.google.com/uc?export=view&id=${file.getId()}`;
+  updateProductoQRURL(sku, url);
   return { url, qrData, fileId: file.getId() };
+}
+
+// Actualiza la columna L (12) = QR_URL en la hoja Productos.
+// Si la columna todavía no existe, la crea con el encabezado "QR_URL".
+function updateProductoQRURL(sku, url) {
+  const s = sheet(SHEET_PRODUCTOS);
+  const last = s.getLastRow();
+  if (last < 2) return;
+  // Asegurar encabezado QR_URL en columna 12
+  const headers = s.getRange(1, 1, 1, Math.max(12, s.getLastColumn())).getValues()[0];
+  if ((headers[11] || '') !== 'QR_URL') {
+    s.getRange(1, 12).setValue('QR_URL');
+  }
+  const skus = s.getRange(2, 1, last-1, 1).getValues();
+  for (let i = 0; i < skus.length; i++) {
+    if (skus[i][0] === sku) {
+      s.getRange(i+2, 12).setValue(url);  // columna L = QR_URL
+      SpreadsheetApp.flush();
+      return;
+    }
+  }
 }
 
 function sincronizarFotos() {
