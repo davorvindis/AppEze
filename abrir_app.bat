@@ -13,7 +13,7 @@ REM ============================================================
 cd /d "%~dp0"
 
 set PORT=8765
-set URL=http://localhost:%PORT%/04_App_Stock.html
+set URL=http://localhost:%PORT%/index.html
 
 REM --- Chequear si Python esta disponible ---
 where python >nul 2>&1
@@ -28,7 +28,7 @@ if %ERRORLEVEL% neq 0 (
         echo    (tildar "Add Python to PATH" en el instalador)
         echo.
         echo  Opcion 2 - Abrir la app directo con doble clic en
-        echo    04_App_Stock.html (funciona igual).
+        echo    index.html (funciona igual).
         echo.
         pause
         exit /b 1

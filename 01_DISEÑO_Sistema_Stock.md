@@ -197,5 +197,5 @@ Formularios simples accesibles desde los flujos de carga, para no frenar la oper
 
 1. `02_Plantilla_Stock.xlsx` — plantilla lista para importar a Google Sheets.
 2. `03_AppsScript_API.gs` — código del backend (pegar en Extensiones → Apps Script).
-3. `04_App_Stock.html` — frontend mobile-first para probar local.
+3. `index.html` — frontend mobile-first (sirve para local y para GitHub Pages / PWA).
 4. `05_Guia_Implementacion.md` — paso a paso para poner todo en marcha.

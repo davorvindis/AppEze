@@ -23,7 +23,7 @@ Antes: información dispersa en papel, WhatsApp y planillas sueltas. Objetivo: c
 
 ```
 ┌────────────────────────────────────────┐
-│  HTML/JS app (04_App_Stock.html)       │  ← corre local o en servidor estático
+│  HTML/JS app (index.html)       │  ← corre local o en servidor estático
 │  - URL y token HARDCODEADOS en el JS   │
 │  - Overlay de login: selector usuario  │
 │    + PIN pad (4 dígitos) con sesión    │
@@ -121,7 +121,7 @@ Ejemplos:
 ├── 01_DISEÑO_Sistema_Stock.md       ← documento de diseño / specs
 ├── 02_Plantilla_Stock.xlsx          ← plantilla del Google Sheets
 ├── 03_AppsScript_API.gs             ← backend (se pega en el editor de Apps Script)
-├── 04_App_Stock.html                ← frontend single-file
+├── index.html                ← frontend single-file
 └── 05_Guia_Implementacion.md        ← paso a paso de setup
 ```
 
@@ -149,7 +149,7 @@ Stock Galpones/                         ← carpeta raíz (configurada por ID en
 2. Subir `02_Plantilla_Stock.xlsx`, convertir a Google Sheet.
 3. Extensiones → Apps Script → pegar `03_AppsScript_API.gs`, editar `API_TOKEN`, `DRIVE_ROOT_FOLDER_ID` y el array `USUARIOS` (usuario + PIN + nombre de cada persona del equipo).
 4. Implementar como Web App, autorizar permisos (Sheets + Drive + UrlFetch), copiar URL `/exec`.
-5. Editar `04_App_Stock.html` y pegar la URL del paso 4 y el token del paso 3 en las constantes `API_URL` y `API_TOKEN` del principio del `<script>`.
+5. Editar `index.html` y pegar la URL del paso 4 y el token del paso 3 en las constantes `API_URL` y `API_TOKEN` del principio del `<script>`.
 6. Abrir el HTML → loguearse con usuario + PIN.
 7. Cargar datos iniciales (zonas, obras, productos) y hacer los ajustes de "Inventario inicial".
 
@@ -185,7 +185,7 @@ Stock Galpones/                         ← carpeta raíz (configurada por ID en
   - Imagen fallback extraída a una constante global `NO_FOTO` (data URL SVG pre-codificado) — desaparece el bug que mostraba el HTML del SVG como texto en las tarjetas cuando fallaba la carga.
 
 **Pendiente / roadmap:**
-1. **Publicación en servidor propio** — mover `04_App_Stock.html` a un hosting (Netlify / Vercel / VPS).
+1. **Publicación en servidor propio** — mover `index.html` a un hosting (Netlify / Vercel / VPS).
 2. **Autenticación robusta** — migrar del esquema actual (token + PIN) a Google Identity Services (login con Google) + permisos por rol (admin, operador, solo lectura). El esquema actual alcanza para un equipo chico pero no escala a permisos diferenciados.
 3. **CORS restringido** — limitar el Apps Script a aceptar sólo requests desde el dominio propio.
 4. **Reportes** — dashboard de consumos mensuales por obra, productos más movidos, rotación, etc.
@@ -201,7 +201,7 @@ Stock Galpones/                         ← carpeta raíz (configurada por ID en
 Si estás entrando al proyecto, empezá por:
 1. Leer `01_DISEÑO_Sistema_Stock.md` para entender el modelo completo.
 2. Leer este README para el stack y las decisiones.
-3. El código vive en dos archivos: `03_AppsScript_API.gs` (~400 líneas, backend) y `04_App_Stock.html` (~700 líneas, frontend). Ambos comentados en castellano.
+3. El código vive en dos archivos: `03_AppsScript_API.gs` (~400 líneas, backend) y `index.html` (~700 líneas, frontend). Ambos comentados en castellano.
 4. La plantilla `02_Plantilla_Stock.xlsx` se puede regenerar desde un script Python que no está en el repo (se puede recrear fácil con openpyxl si hace falta modificarla).
 5. Para probar cambios al backend: editar en el editor de Apps Script, guardar, redesplegar con "Gestionar implementaciones → editar → nueva versión". La URL `/exec` se mantiene.
 6. Para probar el frontend: abrir el archivo HTML en el navegador. No hay build step.

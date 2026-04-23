@@ -15,7 +15,7 @@ Sistema de inventario multi-depósito para materiales de construcción. App web 
 ## Archivos principales
 
 - `03_AppsScript_API.gs` — Backend (~400 líneas)
-- `04_App_Stock.html` — Frontend single-file (~700 líneas)
+- `index.html` — Frontend single-file (~2500 líneas, sirve para local + GitHub Pages)
 - `01_DISEÑO_Sistema_Stock.md` — Specs y modelo completo
 - `02_Plantilla_Stock.xlsx` — Plantilla del Google Sheet
 - `05_Guia_Implementacion.md` — Paso a paso de setup

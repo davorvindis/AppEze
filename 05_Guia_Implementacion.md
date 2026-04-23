@@ -75,7 +75,7 @@ Después de cambiar el array hay que **volver a desplegar**: Implementar → Ges
 
 ## Paso 5 — Pegar URL y token en el HTML (1 min)
 
-Abrí `04_App_Stock.html` con cualquier editor de texto y al principio del `<script>` vas a ver:
+Abrí `index.html` con cualquier editor de texto y al principio del `<script>` vas a ver:
 
 ```js
 const API_URL   = 'https://script.google.com/.../exec';  // reemplazar
@@ -88,7 +88,7 @@ const API_TOKEN = 'el_inventario_123_de_Eze';            // reemplazar
 
 ## Paso 6 — Abrir la app y loguearte (1 min)
 
-Doble clic en `04_App_Stock.html` o subila a tu servidor. Para usarla en el celu más cómodo: Chrome → menú → "Agregar a pantalla de inicio".
+Doble clic en `index.html` o subila a tu servidor. Para usarla en el celu más cómodo: Chrome → menú → "Agregar a pantalla de inicio".
 
 Al abrir:
 1. Si hay más de un usuario, te muestra el selector → tocá tu avatar.
