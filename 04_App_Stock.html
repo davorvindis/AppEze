@@ -12,8 +12,9 @@
 <meta name="apple-mobile-web-app-title" content="Stock">
 <link rel="apple-touch-icon" href="icon-192.png">
 <title>Stock · Galpones</title>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<!-- Google Maps -->
+<script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAKJaDquxnEcr_Dkfvb-6DS-1B3R3zSwyA&callback=_gmapsReady"></script>
+<script>let _gmapsLoaded=false; function _gmapsReady(){_gmapsLoaded=true;}</script>
 <style>
   :root {
     --primary: #1F4E78;
@@ -2287,14 +2288,9 @@ async function submitZona() {
   }
 }
 
-// ============== MAPAS (Leaflet + OpenStreetMap) ==============
+// ============== MAPAS (Google Maps) ==============
 
 // Parsea un link de Google Maps y devuelve { lat, lng } o null.
-// Maneja los formatos comunes:
-//   - .../@-34.5,-58.4,15z  (formato principal cuando compartís un lugar)
-//   - ?q=-34.5,-58.4
-//   - !3d-34.5!4d-58.4  (formato embed)
-// Los links cortos (maps.app.goo.gl, goo.gl/maps) no se pueden resolver del lado del cliente.
 function parseLatLng(url) {
   if (!url) return null;
   const s = String(url);
@@ -2307,19 +2303,19 @@ function parseLatLng(url) {
   return null;
 }
 
-// Estado interno de mapas (para poder destruirlos al cerrar modal)
 let _mapInstance = null;
+let _mapMarkers = [];
+let _mapInfoWindow = null;
 
 function _destroyMap() {
-  if (_mapInstance) { try { _mapInstance.remove(); } catch(e){} _mapInstance = null; }
+  if (_mapInfoWindow) { _mapInfoWindow.close(); _mapInfoWindow = null; }
+  _mapMarkers.forEach(m => m.setMap(null));
+  _mapMarkers = [];
+  _mapInstance = null;
 }
 
 function _renderMapModal(titulo, items, color) {
-  // items: [{ nombre, subtitulo, url, ubicacionUrl }]
-  const parsed = items.map(it => {
-    const ll = parseLatLng(it.ubicacionUrl);
-    return { ...it, ll };
-  });
+  const parsed = items.map(it => ({ ...it, ll: parseLatLng(it.ubicacionUrl) }));
   const ok  = parsed.filter(p => p.ll);
   const bad = parsed.filter(p => !p.ll);
 
@@ -2345,49 +2341,82 @@ function _renderMapModal(titulo, items, color) {
     </div>
   `);
 
-  // Inicializar Leaflet después de que el div esté en el DOM
   setTimeout(() => {
     _destroyMap();
-    if (typeof L === 'undefined') {
+    if (!_gmapsLoaded || typeof google === 'undefined' || !google.maps) {
       document.getElementById('mapa').innerHTML =
-        '<div class="alert alert-err" style="margin:10px;">No se pudo cargar Leaflet. Revisá que tengas internet.</div>';
+        '<div class="alert alert-err" style="margin:10px;">No se pudo cargar Google Maps. Revisá que tengas internet y la API key sea válida.</div>';
       return;
     }
-    const map = L.map('mapa');
+
+    const mapEl = document.getElementById('mapa');
+    const map = new google.maps.Map(mapEl, {
+      zoom: 4,
+      center: { lat: -38.4, lng: -63.6 },
+      mapTypeControl: false,
+      streetViewControl: false,
+      fullscreenControl: true,
+      zoomControl: true,
+      gestureHandling: 'greedy',
+      styles: [
+        { featureType: 'poi', elementType: 'labels', stylers: [{ visibility: 'off' }] }
+      ]
+    });
     _mapInstance = map;
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>'
-    }).addTo(map);
+    _mapInfoWindow = new google.maps.InfoWindow();
 
-    if (!ok.length) {
-      // Vista por defecto: Argentina
-      map.setView([-38.4, -63.6], 4);
-      return;
-    }
+    if (!ok.length) return;
 
-    const markers = ok.map(p => {
-      const icon = L.divIcon({
-        html: `<div style="background:${color};color:#fff;width:28px;height:28px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.3);"><span style="transform:rotate(45deg);font-weight:700;font-size:11px;">${attrEsc((p.nombre||'').charAt(0).toUpperCase())}</span></div>`,
-        className: '',
-        iconSize: [28, 28],
-        iconAnchor: [14, 28],
-        popupAnchor: [0, -26],
+    const bounds = new google.maps.LatLngBounds();
+
+    ok.forEach(p => {
+      const position = { lat: p.ll.lat, lng: p.ll.lng };
+      const initial = (p.nombre || '').charAt(0).toUpperCase();
+
+      const marker = new google.maps.Marker({
+        position,
+        map,
+        label: {
+          text: initial,
+          color: '#fff',
+          fontWeight: '700',
+          fontSize: '12px'
+        },
+        icon: {
+          path: google.maps.SymbolPath.CIRCLE,
+          fillColor: color,
+          fillOpacity: 1,
+          strokeColor: '#fff',
+          strokeWeight: 2,
+          scale: 16
+        },
+        title: p.nombre
       });
-      const mk = L.marker([p.ll.lat, p.ll.lng], { icon }).addTo(map);
-      const popHtml =
-        `<div style="min-width:180px;">
-          <div style="font-weight:700;margin-bottom:4px;">${attrEsc(p.nombre)}</div>
+
+      const infoHtml =
+        `<div style="min-width:180px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+          <div style="font-weight:700;margin-bottom:4px;font-size:14px;">${attrEsc(p.nombre)}</div>
           ${p.subtitulo ? `<div style="font-size:12px;color:#555;margin-bottom:6px;">${attrEsc(p.subtitulo)}</div>` : ''}
-          <a href="${attrEsc(p.ubicacionUrl)}" target="_blank" style="font-size:12px;">Abrir en Google Maps ↗</a>
+          <a href="${attrEsc(p.ubicacionUrl)}" target="_blank" style="font-size:12px;color:#1a73e8;">Abrir en Google Maps ↗</a>
         </div>`;
-      mk.bindPopup(popHtml);
-      return mk;
+
+      marker.addListener('click', () => {
+        _mapInfoWindow.setContent(infoHtml);
+        _mapInfoWindow.open(map, marker);
+      });
+
+      _mapMarkers.push(marker);
+      bounds.extend(position);
     });
 
-    const group = L.featureGroup(markers);
-    map.fitBounds(group.getBounds().pad(0.2));
-    if (ok.length === 1) map.setZoom(15);
+    map.fitBounds(bounds);
+
+    // Si hay un solo punto, hacer zoom a nivel calle
+    if (ok.length === 1) {
+      google.maps.event.addListenerOnce(map, 'bounds_changed', () => {
+        map.setZoom(16);
+      });
+    }
   }, 80);
 }
 
