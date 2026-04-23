@@ -1511,20 +1511,29 @@ async function submitReservaMasiva() {
 // ============== LIBERAR RESERVA MASIVO ==============
 // Cada línea lleva {sku, zona, obra, cantidad}. Las tres primeras se
 // eligen desde las reservas vigentes (STATE.reservasDetalle).
+// Cada línea tiene: SKU, zona+obra ORIGEN (de donde se libera la reserva)
+// y un DESTINO configurable (galpón o obra). Por default, el destino es
+// "galpón = mismo que origen" — o sea, simplemente liberar la reserva.
+// El usuario puede elegir otro galpón (queda traslado implícito) o una
+// obra distinta (queda egreso implícito).
+function _liberaLineaVacia() {
+  return { sku: '', zona: '', obra: '', cantidad: '', destTipo: 'galpon', destZona: '', destObra: '' };
+}
 function openLiberaMasiva(skuPreseleccionado) {
   STATE.liberaBasket = [];
   if (skuPreseleccionado) {
-    // Pre-cargo una línea con el producto y, si hay una sola
-    // combinación (zona+obra) de reserva, la uso de default.
     const reservas = (STATE.reservasDetalle || []).filter(r => r.SKU === skuPreseleccionado);
+    const l = _liberaLineaVacia();
+    l.sku = skuPreseleccionado;
     if (reservas.length === 1) {
-      STATE.liberaBasket.push({ sku: skuPreseleccionado, zona: reservas[0].Zona, obra: reservas[0].Obra, cantidad: '' });
-    } else {
-      STATE.liberaBasket.push({ sku: skuPreseleccionado, zona: '', obra: '', cantidad: '' });
+      l.zona = reservas[0].Zona;
+      l.obra = reservas[0].Obra;
+      l.destZona = reservas[0].Zona; // default: mismo galpón
     }
+    STATE.liberaBasket.push(l);
   }
   if (STATE.liberaBasket.length === 0) {
-    STATE.liberaBasket.push({ sku: '', zona: '', obra: '', cantidad: '' });
+    STATE.liberaBasket.push(_liberaLineaVacia());
   }
 
   openModal(`
@@ -1543,36 +1552,50 @@ function openLiberaMasiva(skuPreseleccionado) {
   renderLiberaBasket();
 }
 
-function lrAgregarLinea() { STATE.liberaBasket.push({ sku: '', zona: '', obra: '', cantidad: '' }); renderLiberaBasket(); }
+function lrAgregarLinea() { STATE.liberaBasket.push(_liberaLineaVacia()); renderLiberaBasket(); }
 function lrQuitarLinea(idx) {
   STATE.liberaBasket.splice(idx, 1);
   if (STATE.liberaBasket.length === 0) lrAgregarLinea();
   renderLiberaBasket();
 }
 function onLrSkuChange(idx, value) {
-  STATE.liberaBasket[idx].sku = value;
-  // Si al cambiar el SKU la zona actual ya no tiene reserva, la limpio
+  const line = STATE.liberaBasket[idx];
+  line.sku = value;
   const zonas = zonasConReserva(value);
-  if (!zonas.find(z => z.Codigo === STATE.liberaBasket[idx].zona)) {
-    // Si hay una sola zona con reserva, la elijo; si hay una sola combinación zona+obra, las dos
-    if (zonas.length === 1) STATE.liberaBasket[idx].zona = zonas[0].Codigo;
-    else STATE.liberaBasket[idx].zona = '';
-    STATE.liberaBasket[idx].obra = '';
+  if (!zonas.find(z => z.Codigo === line.zona)) {
+    line.zona = zonas.length === 1 ? zonas[0].Codigo : '';
+    line.obra = '';
   }
-  const obras = obrasConReserva(value, STATE.liberaBasket[idx].zona);
-  if (obras.length === 1) STATE.liberaBasket[idx].obra = obras[0].Codigo;
+  const obras = obrasConReserva(value, line.zona);
+  if (obras.length === 1) line.obra = obras[0].Codigo;
+  // El destino default sigue al origen salvo que el usuario haya cambiado algo
+  if (!line.destZona || line.destZona === '' /* aun sin tocar */) line.destZona = line.zona;
   renderLiberaBasket();
 }
 function onLrZonaChange(idx, value) {
-  STATE.liberaBasket[idx].zona = value;
-  const obras = obrasConReserva(STATE.liberaBasket[idx].sku, value);
-  if (!obras.find(o => o.Codigo === STATE.liberaBasket[idx].obra)) {
-    STATE.liberaBasket[idx].obra = obras.length === 1 ? obras[0].Codigo : '';
+  const line = STATE.liberaBasket[idx];
+  const prevZona = line.zona;
+  line.zona = value;
+  const obras = obrasConReserva(line.sku, value);
+  if (!obras.find(o => o.Codigo === line.obra)) {
+    line.obra = obras.length === 1 ? obras[0].Codigo : '';
   }
+  // Si el destino estaba sincronizado con el origen anterior, lo resincronizamos
+  if (!line.destZona || line.destZona === prevZona) line.destZona = value;
   renderLiberaBasket();
 }
 function onLrObraChange(idx, value) { STATE.liberaBasket[idx].obra = value; renderLiberaBasket(); }
 function onLrCantChange(idx, value) { STATE.liberaBasket[idx].cantidad = value; validarLiberaBasket(); }
+function onLrDestTipoChange(idx, value) {
+  const line = STATE.liberaBasket[idx];
+  line.destTipo = value;
+  // Si cambia a "galpón" y no hay destZona, default al origen. Si cambia a "obra", limpio destObra.
+  if (value === 'galpon' && !line.destZona) line.destZona = line.zona;
+  if (value === 'obra') line.destObra = line.destObra || '';
+  renderLiberaBasket();
+}
+function onLrDestZonaChange(idx, value) { STATE.liberaBasket[idx].destZona = value; renderLiberaBasket(); }
+function onLrDestObraChange(idx, value) { STATE.liberaBasket[idx].destObra = value; renderLiberaBasket(); }
 
 function renderLiberaBasket() {
   const c = document.getElementById('lr-basket');
@@ -1605,6 +1628,28 @@ function renderLiberaBasket() {
     const cantNum = parseFloat(line.cantidad || '0');
     const excede = cantNum > 0 && cantNum > vigLinea;
 
+    // Opciones de destino
+    const zonaDestOpts = STATE.zonas.map(z =>
+      `<option value="${attrEsc(z.Codigo)}" ${line.destZona === z.Codigo ? 'selected' : ''}>${attrEsc(z.Nombre)}${z.Codigo === line.zona ? ' (mismo que origen)' : ''}</option>`
+    ).join('');
+    const obraDestOpts = STATE.obras.filter(o => o.Estado !== 'Finalizada').map(o =>
+      `<option value="${attrEsc(o.Codigo)}" ${line.destObra === o.Codigo ? 'selected' : ''}>${attrEsc(o.Codigo)} — ${attrEsc(o.Nombre)}</option>`
+    ).join('');
+
+    // Descripción del efecto resultante (hint para el usuario)
+    let destHint = '';
+    if (line.destTipo === 'galpon' && line.destZona) {
+      if (line.destZona === line.zona) {
+        destHint = 'Libera la reserva y el stock queda disponible en el mismo galpón.';
+      } else {
+        const zDest = STATE.zonas.find(z => z.Codigo === line.destZona);
+        destHint = `Libera la reserva y traslada a ${zDest ? zDest.Nombre : line.destZona}.`;
+      }
+    } else if (line.destTipo === 'obra' && line.destObra) {
+      const oDest = STATE.obras.find(o => o.Codigo === line.destObra);
+      destHint = `Libera la reserva y hace egreso${oDest ? ' a ' + oDest.Nombre : ''}.`;
+    }
+
     return `
       <div class="basket-line">
         <button class="del-x" onclick="lrQuitarLinea(${idx})" title="Quitar">✕</button>
@@ -1619,14 +1664,14 @@ function renderLiberaBasket() {
         ${line.sku ? `
           <div class="field-row">
             <div class="field">
-              <label>Galpón</label>
+              <label>Galpón (origen)</label>
               <select onchange="onLrZonaChange(${idx}, this.value)">
                 <option value="">-- elegir --</option>
                 ${zonaOpts || '<option disabled>Sin reservas en ningún galpón</option>'}
               </select>
             </div>
             <div class="field">
-              <label>Obra</label>
+              <label>Obra (reservó)</label>
               <select onchange="onLrObraChange(${idx}, this.value)" ${line.zona ? '' : 'disabled'}>
                 <option value="">${line.zona ? '-- elegir --' : 'primero elegí galpón'}</option>
                 ${obraOpts}
@@ -1639,6 +1684,29 @@ function renderLiberaBasket() {
               <input type="number" step="0.01" inputmode="decimal" value="${attrEsc(line.cantidad)}" oninput="onLrCantChange(${idx}, this.value)" placeholder="Ej: ${vigLinea} para liberar todo">
             </div>
             ${excede ? `<div class="alert alert-err" style="margin:4px 0 0;">⚠ Excede la reserva vigente (${vigLinea})</div>` : ''}
+            <div class="field" style="margin-top:8px;">
+              <label>¿A dónde va el stock liberado?</label>
+              <div class="seg" style="display:flex;gap:6px;margin-bottom:6px;">
+                <label class="seg-opt ${line.destTipo === 'galpon' ? 'on' : ''}" style="flex:1;cursor:pointer;padding:8px 10px;border:1px solid ${line.destTipo === 'galpon' ? '#6d28d9' : '#cbd5e1'};border-radius:8px;background:${line.destTipo === 'galpon' ? '#ede9fe' : '#fff'};text-align:center;font-size:14px;">
+                  <input type="radio" name="lr-dt-${idx}" value="galpon" ${line.destTipo === 'galpon' ? 'checked' : ''} onchange="onLrDestTipoChange(${idx}, 'galpon')" style="margin-right:4px;"> 🏬 Al galpón
+                </label>
+                <label class="seg-opt ${line.destTipo === 'obra' ? 'on' : ''}" style="flex:1;cursor:pointer;padding:8px 10px;border:1px solid ${line.destTipo === 'obra' ? '#6d28d9' : '#cbd5e1'};border-radius:8px;background:${line.destTipo === 'obra' ? '#ede9fe' : '#fff'};text-align:center;font-size:14px;">
+                  <input type="radio" name="lr-dt-${idx}" value="obra" ${line.destTipo === 'obra' ? 'checked' : ''} onchange="onLrDestTipoChange(${idx}, 'obra')" style="margin-right:4px;"> 🏗️ A otra obra
+                </label>
+              </div>
+              ${line.destTipo === 'galpon' ? `
+                <select onchange="onLrDestZonaChange(${idx}, this.value)">
+                  <option value="">-- elegir galpón destino --</option>
+                  ${zonaDestOpts}
+                </select>
+              ` : `
+                <select onchange="onLrDestObraChange(${idx}, this.value)">
+                  <option value="">-- elegir obra destino --</option>
+                  ${obraDestOpts}
+                </select>
+              `}
+              ${destHint ? `<div class="hint" style="margin-top:4px;color:#6d28d9;">${destHint}</div>` : ''}
+            </div>
           ` : ''}
         ` : ''}
       </div>`;
@@ -1656,6 +1724,9 @@ function validarLiberaBasket() {
   for (const l of STATE.liberaBasket) {
     const cant = parseFloat(l.cantidad || '0');
     if (!l.sku || !l.zona || !l.obra || !(cant > 0)) continue;
+    // Validar destino
+    if (l.destTipo === 'galpon' && !l.destZona) continue;
+    if (l.destTipo === 'obra' && !l.destObra) continue;
     const key = l.sku + '||' + l.zona + '||' + l.obra;
     acc[key] = (acc[key] || 0) + cant;
     anyLineOk = true;
@@ -1676,29 +1747,64 @@ async function submitLiberaMasiva() {
 
   const lineas = STATE.liberaBasket.filter(l => {
     const c = parseFloat(l.cantidad || '0');
-    return l.sku && l.zona && l.obra && c > 0;
+    if (!l.sku || !l.zona || !l.obra || !(c > 0)) return false;
+    if (l.destTipo === 'galpon' && !l.destZona) return false;
+    if (l.destTipo === 'obra' && !l.destObra) return false;
+    return true;
   });
-  if (lineas.length === 0) { document.getElementById('mov-msg').innerHTML = '<div class="alert alert-err">Cargá al menos una reserva</div>'; return; }
+  if (lineas.length === 0) { document.getElementById('mov-msg').innerHTML = '<div class="alert alert-err">Cargá al menos una reserva con destino</div>'; return; }
 
-  document.getElementById('mov-msg').innerHTML = `<div class="alert alert-info">Liberando ${lineas.length} reservas...</div>`;
+  // Calcular total de movimientos a crear para mostrar progreso real
+  const totalMovs = lineas.reduce((a, l) => {
+    // Siempre 1 (Libera_Reserva). +1 si hay traslado o egreso.
+    let n = 1;
+    if (l.destTipo === 'galpon' && l.destZona !== l.zona) n++;
+    if (l.destTipo === 'obra') n++;
+    return a + n;
+  }, 0);
 
+  document.getElementById('mov-msg').innerHTML = `<div class="alert alert-info">Procesando ${lineas.length} ${lineas.length === 1 ? 'reserva' : 'reservas'} (${totalMovs} movimientos)...</div>`;
+
+  const usuario = SESSION ? SESSION.user : '';
   let okCount = 0, errs = [];
+
   for (const l of lineas) {
+    const cant = parseFloat(l.cantidad);
     try {
+      // 1) Siempre libero la reserva primero
       await api('addMovimiento', {
-        tipo: 'Libera_Reserva', sku: l.sku, cantidad: parseFloat(l.cantidad),
+        tipo: 'Libera_Reserva', sku: l.sku, cantidad: cant,
         zonaOrigen: l.zona, obra: l.obra,
-        usuario: SESSION ? SESSION.user : '',
-        notas,
+        usuario, notas: notas ? `[Libera] ${notas}` : '',
       });
+
+      // 2) Traslado a otro galpón (opcional)
+      if (l.destTipo === 'galpon' && l.destZona && l.destZona !== l.zona) {
+        await api('addMovimiento', {
+          tipo: 'Traslado', sku: l.sku, cantidad: cant,
+          zonaOrigen: l.zona, zonaDestino: l.destZona,
+          usuario, notas: notas ? `[Traslado post-libera] ${notas}` : 'Traslado por liberación de reserva',
+        });
+      }
+
+      // 3) Egreso a obra distinta (opcional)
+      if (l.destTipo === 'obra' && l.destObra) {
+        await api('addMovimiento', {
+          tipo: 'Egreso', sku: l.sku, cantidad: cant,
+          zonaOrigen: l.zona, obra: l.destObra,
+          usuario, notas: notas ? `[Egreso post-libera] ${notas}` : 'Egreso por reasignación de reserva',
+        });
+      }
+
       okCount++;
     } catch (err) {
-      errs.push(`${l.sku}: ${err.message}`);
+      errs.push(`${l.sku} (${l.zona}→${l.destTipo === 'obra' ? l.destObra : l.destZona}): ${err.message}`);
     }
   }
+
   if (errs.length === 0) {
-    document.getElementById('mov-msg').innerHTML = `<div class="alert alert-ok">${okCount} reservas liberadas ✓</div>`;
-    setTimeout(() => { closeModal(); init(); }, 700);
+    document.getElementById('mov-msg').innerHTML = `<div class="alert alert-ok">${okCount} ${okCount === 1 ? 'reserva liberada' : 'reservas liberadas'} ✓</div>`;
+    setTimeout(() => { closeModal(); init(); }, 800);
   } else {
     document.getElementById('mov-msg').innerHTML =
       `<div class="alert alert-ok">${okCount} OK</div>` +
@@ -2053,20 +2159,20 @@ function blobToBase64(blob) {
   });
 }
 
-// ============== ETIQUETA PNG ==============
-// Genero una etiqueta imprimible 600x900 (proporción 2:3, entra 6 por A4)
-// con header corporativo, nombre del producto, QR grande y SKU + footer.
-// Todo en el cliente: canvas → PNG → descarga directa. No pasa por Drive.
+// ============== ETIQUETA PNG (TERMICA B&N) ==============
+// Generamos una etiqueta 600x900 pura blanco-y-negro para impresoras termicas.
+// Sin grises, sin emojis, sin gradientes, sin sombras. Todo tinta solida y
+// bordes gruesos — lo unico que una termica imprime de forma fiable.
+// Todo se arma en el cliente con canvas → PNG → descarga directa (no toca Drive).
 async function generarEtiquetaProducto(sku) {
   const prod = STATE.productos.find(p => p.SKU === sku);
   if (!prod) return;
   const container = document.getElementById('qr-container');
   if (container) container.innerHTML = '<div class="alert alert-info">Generando etiqueta...</div>';
   try {
-    // 1) QR en alta res via api.qrserver.com (responde con CORS abierto, así
-    //    podemos usarlo en el canvas sin "taintear" el drawing buffer).
+    // 1) QR en alta res via api.qrserver.com (CORS abierto → canvas exportable).
     const qrDestino = `${API_URL}?action=infoProducto&sku=${encodeURIComponent(sku)}`;
-    const qrApiUrl  = `https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(qrDestino)}&size=500x500&margin=2&format=png&ecc=M`;
+    const qrApiUrl  = `https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(qrDestino)}&size=500x500&margin=1&format=png&ecc=H&color=000000&bgcolor=FFFFFF`;
     const qrImg = await _loadImageCors(qrApiUrl);
 
     // 2) Compongo la etiqueta.
@@ -2074,72 +2180,108 @@ async function generarEtiquetaProducto(sku) {
     const canvas = document.createElement('canvas');
     canvas.width = W; canvas.height = H;
     const ctx = canvas.getContext('2d');
-    const FONT_SANS = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+    // Anti-aliasing off para bordes nitidos en termica
+    ctx.imageSmoothingEnabled = false;
+    const FONT_SANS = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif';
     const FONT_MONO = '"SF Mono", Menlo, Consolas, "Liberation Mono", monospace';
+    const BLACK = '#000000', WHITE = '#FFFFFF';
 
     // Fondo blanco
-    ctx.fillStyle = '#FFFFFF';
+    ctx.fillStyle = WHITE;
     ctx.fillRect(0, 0, W, H);
 
-    // Header azul corporativo
-    ctx.fillStyle = '#1F4E78';
-    ctx.fillRect(0, 0, W, 100);
+    // Borde exterior negro grueso (4px, para que la etiqueta tenga marco claro)
+    ctx.strokeStyle = BLACK;
+    ctx.lineWidth = 4;
+    ctx.strokeRect(2, 2, W - 4, H - 4);
 
-    // Texto header
-    ctx.fillStyle = '#FFFFFF';
-    ctx.font = `700 28px ${FONT_SANS}`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('📦 STOCK · GALPONES', W/2, 50);
+    // --- Header: rectangulo negro solido con texto blanco ---
+    ctx.fillStyle = BLACK;
+    ctx.fillRect(4, 4, W - 8, 96);
 
-    // Barra de acento (verde) debajo del header
-    ctx.fillStyle = '#2E8B57';
-    ctx.fillRect(0, 100, W, 4);
-
-    // Nombre del producto (wrap a max 2 líneas, con elipsis si sobra)
-    ctx.fillStyle = '#1F2937';
-    ctx.font = `700 34px ${FONT_SANS}`;
-    const nombreLines = _wrapText(ctx, (prod.Nombre || '').trim(), W - 60, 2);
-    const nombreStartY = nombreLines.length === 1 ? 180 : 162;
-    nombreLines.forEach((line, i) => ctx.fillText(line, W/2, nombreStartY + i * 42));
-
-    // Pill de categoría / subcategoría
-    const catLabel = (prod.Subcategoria || prod.Categoria || '').trim();
-    if (catLabel) {
-      ctx.font = `600 18px ${FONT_SANS}`;
-      const padX = 16, pillH = 34;
-      const textW = ctx.measureText(catLabel).width;
-      const pillW = Math.min(textW + padX * 2, W - 80);
-      const pillX = (W - pillW) / 2;
-      const pillY = 248;
-      _roundRect(ctx, pillX, pillY, pillW, pillH, 17);
-      ctx.fillStyle = '#E3F0E8';
-      ctx.fill();
-      ctx.fillStyle = '#1E6340';
-      ctx.fillText(catLabel, W/2, pillY + pillH/2 + 1);
-    }
-
-    // Card gris claro que enmarca el QR
-    _roundRect(ctx, 50, 306, W - 100, 520, 20);
-    ctx.fillStyle = '#F9FAFB';
-    ctx.fill();
-    ctx.strokeStyle = '#E5E7EB';
-    ctx.lineWidth = 1;
+    // Icono de cajita dibujado a trazos (no emoji — los emoji en termica salen feos)
+    // Cuadrado con "tapa" horizontal y una diagonal — estilo icono de package
+    const icoX = 90, icoY = 38, icoS = 34;
+    ctx.strokeStyle = WHITE;
+    ctx.lineWidth = 3;
+    ctx.lineJoin = 'miter';
+    ctx.strokeRect(icoX, icoY, icoS, icoS);
+    ctx.beginPath();
+    ctx.moveTo(icoX, icoY + 10);
+    ctx.lineTo(icoX + icoS, icoY + 10);
     ctx.stroke();
 
-    // QR centrado en el card
-    const qrSize = 470;
-    ctx.drawImage(qrImg, (W - qrSize)/2, 331, qrSize, qrSize);
+    // Texto del header en blanco
+    ctx.fillStyle = WHITE;
+    ctx.font = `800 30px ${FONT_SANS}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('STOCK · GALPONES', W/2 + 25, 52);
 
-    // SKU en monospace, color primary
-    ctx.fillStyle = '#1F4E78';
-    ctx.font = `700 26px ${FONT_MONO}`;
-    ctx.fillText(prod.SKU || '', W/2, 852);
+    // --- Doble linea separadora debajo del header ---
+    ctx.strokeStyle = BLACK;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(30, 118); ctx.lineTo(W - 30, 118);
+    ctx.stroke();
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(30, 126); ctx.lineTo(W - 30, 126);
+    ctx.stroke();
 
-    // Footer gris
-    ctx.fillStyle = '#9CA3AF';
-    ctx.font = `400 14px ${FONT_SANS}`;
-    ctx.fillText('Escaneá para ver stock en tiempo real', W/2, 882);
+    // --- Nombre del producto (bold grande, 2 lineas max, uppercase para legibilidad termica) ---
+    ctx.fillStyle = BLACK;
+    ctx.font = `800 36px ${FONT_SANS}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const nombreUpper = (prod.Nombre || '').trim().toUpperCase();
+    const nombreLines = _wrapText(ctx, nombreUpper, W - 60, 2);
+    const nombreStartY = nombreLines.length === 1 ? 180 : 162;
+    nombreLines.forEach((line, i) => ctx.fillText(line, W/2, nombreStartY + i * 44));
+
+    // --- Caja de categoria / subcategoria (rectangulo con borde negro, sin fill gris) ---
+    const catLabel = (prod.Subcategoria || prod.Categoria || '').trim().toUpperCase();
+    if (catLabel) {
+      ctx.font = `700 20px ${FONT_SANS}`;
+      const padX = 18, boxH = 38;
+      const textW = ctx.measureText(catLabel).width;
+      const boxW = Math.min(textW + padX * 2, W - 80);
+      const boxX = (W - boxW) / 2;
+      const boxY = 252;
+      ctx.lineWidth = 3;
+      ctx.strokeRect(boxX, boxY, boxW, boxH);
+      ctx.fillStyle = BLACK;
+      ctx.fillText(catLabel, W/2, boxY + boxH/2 + 1);
+    }
+
+    // --- QR con marco negro grueso (sin card gris) ---
+    const qrFrameX = 55, qrFrameY = 312, qrFrameSize = W - 110;
+    ctx.lineWidth = 4;
+    ctx.strokeRect(qrFrameX, qrFrameY, qrFrameSize, qrFrameSize);
+    // QR interno, con padding de 12px blanco para no pisar el marco
+    const qrPad = 12;
+    const qrSize = qrFrameSize - qrPad * 2;
+    ctx.drawImage(qrImg, qrFrameX + qrPad, qrFrameY + qrPad, qrSize, qrSize);
+
+    // --- Doble linea separadora antes del SKU ---
+    const sepY = qrFrameY + qrFrameSize + 22;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(30, sepY); ctx.lineTo(W - 30, sepY);
+    ctx.stroke();
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(30, sepY + 8); ctx.lineTo(W - 30, sepY + 8);
+    ctx.stroke();
+
+    // --- SKU en monospace bold, GIGANTE, negro puro ---
+    ctx.fillStyle = BLACK;
+    ctx.font = `800 42px ${FONT_MONO}`;
+    ctx.fillText(prod.SKU || '', W/2, sepY + 48);
+
+    // --- Footer: texto instruccional, todo negro (no gris) ---
+    ctx.font = `600 16px ${FONT_SANS}`;
+    ctx.fillText('ESCANEA PARA VER STOCK EN TIEMPO REAL', W/2, sepY + 84);
 
     // 3) Descargo el PNG
     const pngBlob = await new Promise(r => canvas.toBlob(r, 'image/png'));
@@ -2153,8 +2295,8 @@ async function generarEtiquetaProducto(sku) {
     // 4) Preview en el container del modal
     if (container) container.innerHTML = `
       <div class="alert alert-ok">Etiqueta generada y descargada ✓</div>
-      <img src="${pngUrl}" alt="Etiqueta ${attrEsc(sku)}" style="max-width:280px;display:block;margin:10px auto;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.12);">
-      <div class="hint" style="text-align:center;">PNG 600×900. Imprimila tal cual o metela en una hoja A4 (entran ~6).</div>`;
+      <img src="${pngUrl}" alt="Etiqueta ${attrEsc(sku)}" style="max-width:280px;display:block;margin:10px auto;border:1px solid #ddd;">
+      <div class="hint" style="text-align:center;">PNG 600×900 blanco y negro puro — optimizado para impresora térmica. También imprime OK en láser/inkjet (entran ~6 en A4).</div>`;
   } catch (err) {
     if (container) container.innerHTML = `<div class="alert alert-err">${attrEsc(err.message)}</div>`;
   }
