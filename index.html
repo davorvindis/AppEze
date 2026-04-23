@@ -1,0 +1,2417 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#143757">
+<title>Stock · Galpones</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<style>
+  :root {
+    --primary: #1F4E78;
+    --primary-dark: #143757;
+    --primary-deep: #0B1F35;
+    --accent: #2E8B57;
+    --accent-2: #3BA272;
+    --warn: #C0392B;
+    --warn-2: #FF6B6B;
+    --orange: #D97706;
+    --purple: #7C3AED;
+    --bg: #F4F6F9;
+    --card: #FFFFFF;
+    --text: #222;
+    --muted: #6B7280;
+    --border: #E3E7ED;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin:0; padding:0; background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; font-size:16px; }
+
+  /* ================= LOGIN ================= */
+  #login-view {
+    position:fixed; inset:0; z-index:300;
+    background: radial-gradient(ellipse at top, #2A5F8F 0%, #143757 40%, #0B1F35 100%);
+    display:none; flex-direction:column; align-items:center; justify-content:center;
+    padding:30px 20px;
+    overflow-y:auto;
+  }
+  #login-view.open { display:flex; }
+  .login-logo { font-size:52px; margin-bottom:6px; filter: drop-shadow(0 4px 10px rgba(0,0,0,0.3)); }
+  .login-title { color:#fff; font-size:22px; font-weight:700; margin:0; letter-spacing:0.4px; }
+  .login-sub { color:rgba(255,255,255,0.65); font-size:13px; margin:4px 0 26px; }
+
+  /* Selección de usuario */
+  .user-pick { display:grid; gap:10px; width:100%; max-width:340px; }
+  .user-card {
+    background:rgba(255,255,255,0.08);
+    border:1px solid rgba(255,255,255,0.14);
+    border-radius:14px; padding:14px 16px;
+    display:flex; align-items:center; gap:14px;
+    color:#fff; cursor:pointer;
+    transition:transform .12s ease, background .15s ease;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+  }
+  .user-card:active { transform:scale(0.98); background:rgba(255,255,255,0.16); }
+  .user-card .avatar-sm {
+    width:44px; height:44px; border-radius:50%;
+    background:linear-gradient(135deg, #3BA272, #1F4E78);
+    display:flex; align-items:center; justify-content:center;
+    font-weight:700; font-size:18px;
+    box-shadow:0 4px 10px rgba(0,0,0,0.25);
+  }
+  .user-card .t strong { display:block; font-size:16px; font-weight:600; }
+  .user-card .t small  { color:rgba(255,255,255,0.65); font-size:12px; }
+  .user-card .chev { margin-left:auto; color:rgba(255,255,255,0.5); font-size:20px; }
+
+  /* PIN */
+  .pin-screen { display:flex; flex-direction:column; align-items:center; width:100%; }
+  .user-avatar-lg {
+    width:82px; height:82px; border-radius:50%;
+    background:linear-gradient(135deg, #3BA272, #1F4E78);
+    color:#fff; display:flex; align-items:center; justify-content:center;
+    font-size:32px; font-weight:700;
+    margin:0 auto 14px;
+    box-shadow:0 10px 28px rgba(0,0,0,0.35);
+    border:3px solid rgba(255,255,255,0.18);
+  }
+  .user-name { color:#fff; font-size:18px; font-weight:600; margin-bottom:6px; letter-spacing:.2px; }
+  .user-hint { color:rgba(255,255,255,0.55); font-size:13px; margin-bottom:22px; }
+  .pin-dots { display:flex; gap:16px; margin-bottom:28px; justify-content:center; }
+  .pin-dot {
+    width:14px; height:14px; border-radius:50%;
+    background:rgba(255,255,255,0.14);
+    border:1.5px solid rgba(255,255,255,0.38);
+    transition: all .18s cubic-bezier(.3,.6,.3,1);
+  }
+  .pin-dot.filled { background:#fff; border-color:#fff; transform:scale(1.18); box-shadow:0 0 12px rgba(255,255,255,0.55); }
+  .pin-dot.error { background:var(--warn-2); border-color:var(--warn-2); box-shadow:0 0 12px rgba(255,107,107,0.55); }
+  .pin-pad { display:grid; grid-template-columns:repeat(3, 72px); gap:16px; }
+  .pin-key {
+    width:72px; height:72px; border-radius:50%;
+    background:rgba(255,255,255,0.07);
+    border:1px solid rgba(255,255,255,0.13);
+    color:#fff; font-size:28px; font-weight:500;
+    cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+    transition:all .1s ease;
+    user-select:none;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+  }
+  .pin-key:active { background:rgba(255,255,255,0.28); transform:scale(0.92); }
+  .pin-key.spacer { visibility:hidden; pointer-events:none; background:transparent; border:none; }
+  .pin-key.back   { font-size:22px; background:transparent; border:1px solid rgba(255,255,255,0.08); }
+  .pin-err { color:var(--warn-2); font-size:13px; margin-top:16px; min-height:20px; text-align:center; font-weight:500; }
+  .pin-switch {
+    margin-top:28px; color:rgba(255,255,255,0.72);
+    background:none; border:none; font-size:13px; cursor:pointer;
+    padding:8px 16px; border-radius:8px;
+  }
+  .pin-switch:active { background:rgba(255,255,255,0.08); }
+  @keyframes shake { 0%,100%{transform:translateX(0)} 20%,60%{transform:translateX(-8px)} 40%,80%{transform:translateX(8px)} }
+  .pin-shake { animation: shake .4s; }
+
+  /* ================= APP (una vez logueado) ================= */
+  header { position:sticky; top:0; z-index:10; background:var(--primary); color:#fff; padding:12px 16px; box-shadow:0 2px 8px rgba(0,0,0,.12); }
+  header .top { display:flex; justify-content:space-between; align-items:center; gap:10px; }
+  header h1 { margin:0; font-size:17px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .user-chip {
+    display:inline-flex; align-items:center; gap:8px;
+    background:rgba(255,255,255,0.13);
+    border:1px solid rgba(255,255,255,0.18);
+    border-radius:999px; padding:4px 10px 4px 5px;
+    cursor:pointer; color:#fff; font-size:13px;
+    transition:background .12s ease;
+  }
+  .user-chip:active { background:rgba(255,255,255,0.25); }
+  .user-chip .avatar-xs {
+    width:26px; height:26px; border-radius:50%;
+    background:linear-gradient(135deg, #3BA272, #1F4E78);
+    display:flex; align-items:center; justify-content:center;
+    font-weight:700; font-size:12px;
+  }
+  .user-chip .logout { font-size:15px; opacity:.8; padding-left:2px; }
+
+  .nav-tabs { display:flex; gap:4px; overflow-x:auto; margin-top:10px; padding-bottom:2px; }
+  .nav-tabs button { flex-shrink:0; background:rgba(255,255,255,.15); border:none; color:#fff; padding:6px 12px; border-radius:6px; font-size:13px; cursor:pointer; }
+  .nav-tabs button.active { background:#fff; color:var(--primary); font-weight:600; }
+  main { padding:12px; max-width:800px; margin:0 auto; padding-bottom:90px; }
+  .tabs { display:flex; gap:6px; overflow-x:auto; padding:8px 0; margin-bottom:8px; }
+  .tab { flex-shrink:0; padding:8px 14px; background:#fff; border:1px solid var(--border); border-radius:999px; font-size:14px; cursor:pointer; color:var(--muted); }
+  .tab.active { background:var(--primary); color:#fff; border-color:var(--primary); }
+  .search { display:flex; gap:8px; margin-bottom:12px; }
+  .search input, .search select { flex:1; padding:12px; border:1px solid var(--border); border-radius:8px; background:#fff; font-size:15px; }
+  .card { background:var(--card); border-radius:12px; padding:12px; margin-bottom:10px; box-shadow:0 1px 3px rgba(0,0,0,.05); display:flex; gap:12px; align-items:flex-start; cursor:pointer; }
+  .card img { width:64px; height:64px; border-radius:8px; object-fit:cover; background:#eee; flex-shrink:0; }
+  .card .info { flex:1; min-width:0; }
+  .card .title { font-weight:600; font-size:15px; margin-bottom:4px; }
+  .card .sub { color:var(--muted); font-size:13px; margin-bottom:6px; }
+  .chips { display:flex; flex-wrap:wrap; gap:4px; }
+  .chip { background:#EEF2F7; color:var(--primary); padding:3px 8px; border-radius:12px; font-size:12px; font-weight:500; }
+  .chip.warn { background:#FDE8E6; color:var(--warn); }
+  .totals { display:flex; flex-direction:column; align-items:flex-end; gap:2px; }
+  .total-big { font-size:20px; font-weight:700; color:var(--primary); }
+  .unit { font-size:11px; color:var(--muted); }
+  .badge-warn { background:var(--warn); color:#fff; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600; }
+  .fab { position:fixed; bottom:12px; right:12px; left:12px; max-width:760px; margin:0 auto; display:grid; grid-template-columns:repeat(3,1fr); gap:6px; z-index:20; }
+  .fab button { padding:10px 4px; border:none; border-radius:10px; font-size:12px; font-weight:600; color:#fff; cursor:pointer; box-shadow:0 4px 12px rgba(0,0,0,.15); }
+  .fab .b-in  { background:var(--accent); }
+  .fab .b-tr  { background:var(--primary); }
+  .fab .b-eg  { background:var(--orange); }
+  .fab .b-re  { background:var(--purple); }
+  .fab .b-li  { background:#475569; }
+  .fab .b-aj  { background:#6B7280; }
+
+  /* Modal */
+  .modal-bg { position:fixed; inset:0; background:rgba(0,0,0,.5); display:none; align-items:flex-end; z-index:100; }
+  .modal-bg.open { display:flex; }
+  .modal { background:#fff; width:100%; max-width:600px; margin:0 auto; border-radius:16px 16px 0 0; padding:18px; max-height:92vh; overflow-y:auto; }
+  .modal h2 { margin:0 0 12px; font-size:18px; color:var(--primary); }
+  .field { margin-bottom:12px; }
+  .field label { display:block; font-size:13px; color:var(--muted); margin-bottom:4px; font-weight:500; }
+  .field input, .field select, .field textarea { width:100%; padding:12px; border:1px solid var(--border); border-radius:8px; font-size:15px; background:#fff; }
+  .field textarea { min-height:60px; resize:vertical; }
+  .field .row-with-btn { display:flex; gap:6px; }
+  .field .row-with-btn select { flex:1; }
+  .field .row-with-btn button { background:var(--accent); color:#fff; border:none; border-radius:8px; padding:0 14px; font-weight:600; cursor:pointer; font-size:13px; }
+  .field-row { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .toggle-row { display:flex; align-items:center; gap:8px; background:#F4F6F9; padding:10px 12px; border-radius:8px; margin-bottom:8px; }
+  .combo { position:relative; }
+  .combo input[type="text"] { width:100%; box-sizing:border-box; }
+  .combo-list { display:none; position:absolute; left:0; right:0; top:calc(100% + 4px); background:var(--card); border:1px solid var(--border); border-radius:8px; max-height:260px; overflow-y:auto; z-index:500; box-shadow:0 8px 20px rgba(0,0,0,.14); }
+  .combo-list.open { display:block; }
+  .combo-item { padding:10px 12px; cursor:pointer; font-size:14px; border-bottom:1px solid var(--border); }
+  .combo-item:last-child { border-bottom:none; }
+  .combo-item:hover, .combo-item:active { background:var(--bg); }
+  .combo-empty { padding:12px; color:var(--muted); text-align:center; font-size:13px; }
+  .toggle-row input[type=checkbox] { width:18px; height:18px; }
+  .toggle-row label { margin:0; font-size:14px; color:var(--text); flex:1; cursor:pointer; }
+  .btn-row { display:flex; gap:8px; margin-top:8px; }
+  .btn { flex:1; padding:14px; border:none; border-radius:10px; font-size:15px; font-weight:600; cursor:pointer; }
+  .btn-primary { background:var(--primary); color:#fff; }
+  .btn-secondary { background:#E3E7ED; color:var(--text); }
+  .btn-accent { background:var(--accent); color:#fff; }
+  .btn-warn { background:var(--warn); color:#fff; }
+  .btn-purple { background:var(--purple); color:#fff; }
+  .btn-orange { background:var(--orange); color:#fff; }
+  .btn:disabled { opacity:.5; cursor:not-allowed; }
+  .alert { padding:10px 12px; border-radius:8px; margin-bottom:10px; font-size:14px; }
+  .alert-err { background:#FDE8E6; color:var(--warn); border:1px solid #F5B7B1; }
+  .alert-ok  { background:#D5F5E3; color:#1E8449; border:1px solid #ABEBC6; }
+  .alert-info { background:#D6EAF8; color:#1B4F72; border:1px solid #AED6F1; }
+  .empty { text-align:center; color:var(--muted); padding:40px 20px; }
+  .loader { text-align:center; padding:30px; color:var(--muted); }
+  .detail-rows .row { display:flex; justify-content:space-between; padding:10px 0; border-bottom:1px solid var(--border); font-size:14px; }
+  .list-item { background:#fff; border-radius:10px; padding:12px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; box-shadow:0 1px 3px rgba(0,0,0,.04); }
+  .list-item .info { flex:1; min-width:0; }
+  .list-item .info strong { display:block; font-size:15px; margin-bottom:2px; }
+  .list-item .info small { color:var(--muted); font-size:12px; }
+  .list-item .actions a { text-decoration:none; color:var(--primary); font-weight:600; font-size:13px; padding:8px 12px; border:1px solid var(--primary); border-radius:6px; display:inline-block; }
+  .mov-row { display:grid; grid-template-columns:60px 1fr auto; gap:10px; padding:8px 0; border-bottom:1px solid var(--border); font-size:14px; align-items:center; }
+  .mov-row .tipo { padding:3px 7px; border-radius:4px; font-size:11px; font-weight:600; color:#fff; text-align:center; }
+  .mov-row .tipo.Ingreso { background:var(--accent); }
+  .mov-row .tipo.Traslado { background:var(--primary); }
+  .mov-row .tipo.Egreso { background:var(--orange); }
+  .mov-row .tipo.Ajuste { background:#6B7280; }
+  .mov-row .tipo.Reserva { background:var(--purple); }
+  .mov-row .tipo.Libera_Reserva { background:#9B59B6; }
+  .foto-preview { width:100%; max-height:200px; object-fit:cover; border-radius:8px; margin:8px 0; }
+  .qr-preview { display:block; margin:10px auto; max-width:200px; border:1px solid var(--border); border-radius:8px; padding:6px; }
+  .hint { font-size:12px; color:var(--muted); margin-top:4px; }
+  .hint-strong { background:#FFF3CD; color:#7D5A00; padding:8px 10px; border-radius:6px; font-size:13px; margin-top:6px; }
+
+  .basket-line { background:#F4F6F9; border:1px solid var(--border); border-radius:10px; padding:10px; margin-bottom:8px; position:relative; }
+  .basket-line .del-x { position:absolute; top:6px; right:8px; background:none; border:none; color:var(--warn); font-size:18px; cursor:pointer; padding:4px; }
+  .basket-line .head { font-weight:600; padding-right:24px; margin-bottom:6px; }
+  .basket-line small { color:var(--muted); }
+  .add-line-btn { background:#E3E7ED; color:var(--text); border:1px dashed var(--muted); border-radius:10px; padding:10px; width:100%; font-weight:600; cursor:pointer; margin-bottom:8px; }
+
+  /* App oculto hasta login */
+  .app-hidden { display:none !important; }
+</style>
+</head>
+<body>
+
+<!-- ================= LOGIN ================= -->
+<div id="login-view">
+  <div class="login-logo">📦</div>
+  <h1 class="login-title">Stock · Galpones</h1>
+  <div class="login-sub" id="login-sub">Elegí tu usuario</div>
+
+  <!-- Paso 1: seleccionar usuario -->
+  <div id="login-users" class="user-pick"></div>
+
+  <!-- Paso 2: PIN -->
+  <div id="login-pin" class="pin-screen" style="display:none;">
+    <div class="user-avatar-lg" id="pin-avatar"></div>
+    <div class="user-name" id="pin-name"></div>
+    <div class="user-hint">Ingresá tu PIN</div>
+    <div class="pin-dots" id="pin-dots">
+      <div class="pin-dot"></div>
+      <div class="pin-dot"></div>
+      <div class="pin-dot"></div>
+      <div class="pin-dot"></div>
+    </div>
+    <div class="pin-pad" id="pin-pad">
+      <button type="button" class="pin-key" onclick="pinDigit('1')">1</button>
+      <button type="button" class="pin-key" onclick="pinDigit('2')">2</button>
+      <button type="button" class="pin-key" onclick="pinDigit('3')">3</button>
+      <button type="button" class="pin-key" onclick="pinDigit('4')">4</button>
+      <button type="button" class="pin-key" onclick="pinDigit('5')">5</button>
+      <button type="button" class="pin-key" onclick="pinDigit('6')">6</button>
+      <button type="button" class="pin-key" onclick="pinDigit('7')">7</button>
+      <button type="button" class="pin-key" onclick="pinDigit('8')">8</button>
+      <button type="button" class="pin-key" onclick="pinDigit('9')">9</button>
+      <button type="button" class="pin-key spacer" tabindex="-1"></button>
+      <button type="button" class="pin-key" onclick="pinDigit('0')">0</button>
+      <button type="button" class="pin-key back" onclick="pinBack()">⌫</button>
+    </div>
+    <div class="pin-err" id="pin-err"></div>
+    <button type="button" class="pin-switch" onclick="showUserPicker()">← Cambiar usuario</button>
+  </div>
+</div>
+
+<!-- ================= APP ================= -->
+<div id="app-root" class="app-hidden">
+
+<header>
+  <div class="top">
+    <h1>📦 Stock · Galpones</h1>
+    <div class="user-chip" onclick="confirmLogout()" title="Cerrar sesión">
+      <div class="avatar-xs" id="hdr-avatar">?</div>
+      <span id="hdr-nombre">—</span>
+      <span class="logout">⏻</span>
+    </div>
+  </div>
+  <div class="nav-tabs" id="nav-tabs">
+    <button data-view="stock" class="active" onclick="showView('stock')">Stock</button>
+    <button data-view="productos" onclick="showView('productos')">Productos</button>
+    <button data-view="zonas" onclick="showView('zonas')">Zonas</button>
+    <button data-view="obras" onclick="showView('obras')">Obras</button>
+  </div>
+</header>
+
+<main>
+
+<!-- Vista: Stock -->
+<div id="view-stock">
+  <div class="tabs" id="zona-tabs"></div>
+  <div class="search">
+    <input type="text" id="search-input" placeholder="Buscar por nombre o SKU..." oninput="renderStock()">
+    <select id="cat-filter" onchange="renderStock()"><option value="">Todas las categorías</option></select>
+  </div>
+  <div id="stock-list"><div class="loader">Cargando stock...</div></div>
+</div>
+
+<!-- Vista: Productos -->
+<div id="view-productos" style="display:none;">
+  <div style="display:flex;gap:8px;margin-bottom:12px;">
+    <input type="text" id="prod-search" placeholder="Buscar producto..." oninput="renderProductos()" style="flex:1;padding:12px;border:1px solid var(--border);border-radius:8px;">
+    <button class="btn btn-accent" style="flex:none;padding:12px 16px;" onclick="openNuevoProducto()">+ Nuevo</button>
+  </div>
+  <div id="productos-list"></div>
+</div>
+
+<!-- Vista: Zonas -->
+<div id="view-zonas" style="display:none;">
+  <h3 style="margin-top:0;color:var(--primary);">Galpones y depósitos</h3>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+    <button class="btn btn-accent" onclick="openNuevoDeposito()" style="padding:10px 16px;">+ Nuevo depósito</button>
+    <button class="btn btn-primary" onclick="openMapaZonas()" style="padding:10px 16px;">📍 Ver depósitos en mapa</button>
+  </div>
+  <div id="zonas-list"></div>
+</div>
+
+<!-- Vista: Obras -->
+<div id="view-obras" style="display:none;">
+  <h3 style="margin-top:0;color:var(--primary);">Obras</h3>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+    <button class="btn btn-accent" onclick="openNuevaObra()" style="padding:10px 16px;">+ Nueva obra</button>
+    <button class="btn btn-primary" onclick="openMapaObras()" style="padding:10px 16px;">📍 Ver obras en mapa</button>
+  </div>
+  <div id="obras-list"></div>
+</div>
+
+</main>
+
+<!-- FAB -->
+<div class="fab" id="fab">
+  <button class="b-in" onclick="openMovimiento('Ingreso')">+ Ingreso</button>
+  <button class="b-tr" onclick="openMovimiento('Traslado')">↔ Traslado</button>
+  <button class="b-eg" onclick="openEgresoMasivo()">→ Egreso</button>
+  <button class="b-re" onclick="openReservaMasiva()">📌 Reservar</button>
+  <button class="b-li" onclick="openLiberaMasiva()">↺ Liberar</button>
+  <button class="b-aj" onclick="openMovimiento('Ajuste')">± Ajuste</button>
+</div>
+
+<!-- Modal genérico -->
+<div class="modal-bg" id="modal-bg" onclick="if(event.target===this) closeModal()">
+  <div class="modal" id="modal"></div>
+</div>
+
+</div><!-- /#app-root -->
+
+<script>
+// ============== CONFIGURACIÓN HARDCODEADA ==============
+const API_URL   = 'https://script.google.com/macros/s/AKfycbwJGWoCi3004QpbwVdM_4EGp-K64ZcQhuzHUhdQ9KypaEEGcOyHVmesmU-xh8M_vrw/exec';
+const API_TOKEN = 'el_inventario_123_de_Eze';
+// =======================================================
+
+// SVG "sin foto" — pre-codificado para que el onerror funcione sin escapes raros.
+const NO_FOTO = 'data:image/svg+xml;utf8,' + encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" fill="#E3E7ED"/><text x="32" y="38" text-anchor="middle" font-size="28" fill="#6B7280">&#128230;</text></svg>'
+);
+window.NO_FOTO = NO_FOTO;
+
+// Helpers de escape
+function attrEsc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+    .replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function jsStr(s) {
+  // JSON.stringify produce comillas dobles JS-válidas. attrEsc convierte " → &quot;
+  // para que sobreviva dentro de onclick='...' sin cerrar el atributo.
+  return attrEsc(JSON.stringify(String(s == null ? '' : s)));
+}
+function initialsOf(name) {
+  const t = (name || '?').trim();
+  if (!t) return '?';
+  const parts = t.split(/\s+/).filter(Boolean);
+  return (parts[0][0] + (parts[1] ? parts[1][0] : '')).toUpperCase();
+}
+
+// ============== ESTADO ==============
+let STATE = {
+  productos: [], zonas: [], obras: [], categorias: [], stock: [],
+  reservasDetalle: [],  // [{SKU, Zona, Obra, Cantidad}] — solo > 0 (vigentes)
+  currentZone: 'TODAS',
+  egresoBasket: [],
+  reservaBasket: [],  // [{sku, zona, cantidad}]
+  liberaBasket: [],   // [{sku, zona, obra, cantidad}]
+};
+let USUARIOS_LIST = [];  // cache de getUsuarios
+let SESSION = null;      // { user, nombre }
+let PIN_BUF = '';
+let SEL_USER = null;     // usuario seleccionado en el login pre-PIN
+
+// ============== SESIÓN ==============
+function loadSession() {
+  try {
+    const raw = sessionStorage.getItem('stock_session');
+    if (!raw) return null;
+    const s = JSON.parse(raw);
+    if (s && s.user && s.nombre) return s;
+  } catch (_) {}
+  return null;
+}
+function saveSession(s) { sessionStorage.setItem('stock_session', JSON.stringify(s)); }
+function clearSession() { sessionStorage.removeItem('stock_session'); }
+
+// ============== API ==============
+// ---- Saving overlay (blur + spinner) ----
+function _ensureSaving() {
+  if (document.getElementById('saving-overlay')) return;
+  const css = document.createElement('style');
+  css.textContent = `
+    .saving-overlay{position:fixed;inset:0;background:rgba(11,31,53,.55);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);display:none;align-items:center;justify-content:center;z-index:99999}
+    .saving-overlay.show{display:flex}
+    .saving-box{background:#fff;padding:22px 28px;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.35);display:flex;align-items:center;gap:14px;font-weight:700;color:var(--primary);font-size:16px}
+    .saving-spin{width:22px;height:22px;border:3px solid #E3E7ED;border-top-color:var(--primary);border-radius:50%;animation:spin .8s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .dots::after{content:'';animation:dots 1.2s steps(4,end) infinite}
+    @keyframes dots{0%{content:''}25%{content:'.'}50%{content:'..'}75%{content:'...'}}
+  `;
+  document.head.appendChild(css);
+  const el = document.createElement('div');
+  el.id = 'saving-overlay'; el.className = 'saving-overlay';
+  el.innerHTML = '<div class="saving-box"><div class="saving-spin"></div><span id="saving-msg">Guardando...</span></div>';
+  document.body.appendChild(el);
+}
+function showSaving(msg){_ensureSaving();const el=document.getElementById('saving-msg');const txt=msg||'Guardando';el.innerHTML='<span>'+attrEsc(txt)+'</span><span class="dots"></span>';document.getElementById('saving-overlay').classList.add('show');}
+function hideSaving(){const el=document.getElementById('saving-overlay');if(el)el.classList.remove('show');}
+
+// Actions que son de escritura (muestran overlay)
+const _WRITE_ACTIONS = ['addMovimiento','addProducto','addObra','addZona','uploadFoto','generarQR','sincronizarFotos','login'];
+
+async function api(action, extra = {}, method = 'GET') {
+  const isWrite = _WRITE_ACTIONS.indexOf(action) !== -1;
+  if (isWrite) showSaving(action === 'login' ? 'Conectando' : action === 'uploadFoto' ? 'Subiendo foto' : action === 'generarQR' ? 'Generando QR' : 'Guardando');
+  try {
+    if (method === 'POST') {
+      const body = JSON.stringify({ action, token: API_TOKEN, ...extra });
+      const res = await fetch(API_URL, { method:'POST', headers:{ 'Content-Type':'text/plain;charset=utf-8' }, body });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error);
+      return data.data;
+    } else {
+      const params = new URLSearchParams({ action, token: API_TOKEN, ...extra });
+      const res = await fetch(API_URL + '?' + params.toString(), { method: 'GET' });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error);
+      return data.data;
+    }
+  } finally {
+    if (isWrite) hideSaving();
+  }
+}
+async function apiPostJSON(action, extra = {}) {
+  // IMPORTANTE: usamos text/plain (no application/json) para evitar el
+  // preflight CORS OPTIONS. Apps Script no responde OPTIONS y lo rechaza.
+  // El backend parsea el JSON del body igual, mirando postData.contents.
+  const isWrite = _WRITE_ACTIONS.indexOf(action) !== -1;
+  if (isWrite) showSaving(action === 'login' ? 'Conectando' : action === 'uploadFoto' ? 'Subiendo foto' : action === 'generarQR' ? 'Generando QR' : 'Guardando');
+  try {
+    const body = JSON.stringify({ action, token: API_TOKEN, ...extra });
+    const res = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body, redirect: 'follow',
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error);
+    return data.data;
+  } finally {
+    if (isWrite) hideSaving();
+  }
+}
+
+// ============== LOGIN FLOW ==============
+async function bootLogin() {
+  document.getElementById('login-view').classList.add('open');
+  document.getElementById('app-root').classList.add('app-hidden');
+  const sub = document.getElementById('login-sub');
+  sub.textContent = 'Cargando usuarios...';
+  try {
+    USUARIOS_LIST = await api('getUsuarios');
+  } catch (err) {
+    sub.innerHTML = '<span style="color:#FF9B9B">No pude conectar con el servidor:<br>' + attrEsc(err.message) + '</span>';
+    return;
+  }
+  if (!USUARIOS_LIST.length) {
+    sub.innerHTML = '<span style="color:#FF9B9B">No hay usuarios cargados en el Apps Script.</span>';
+    return;
+  }
+  // Si hay un solo usuario, saltamos directo al PIN
+  if (USUARIOS_LIST.length === 1) {
+    selectUser(USUARIOS_LIST[0]);
+    return;
+  }
+  showUserPicker();
+}
+
+function showUserPicker() {
+  document.getElementById('login-sub').textContent = 'Elegí tu usuario';
+  document.getElementById('login-users').style.display = '';
+  document.getElementById('login-pin').style.display = 'none';
+  document.getElementById('login-users').innerHTML = USUARIOS_LIST.map(u => `
+    <div class="user-card" onclick='selectUser(${jsStr(JSON.stringify(u))})'>
+      <div class="avatar-sm">${attrEsc(initialsOf(u.nombre))}</div>
+      <div class="t"><strong>${attrEsc(u.nombre)}</strong><small>${attrEsc(u.user)}</small></div>
+      <div class="chev">›</div>
+    </div>
+  `).join('');
+}
+
+function selectUser(u) {
+  if (typeof u === 'string') u = JSON.parse(u);
+  SEL_USER = u;
+  PIN_BUF = '';
+  document.getElementById('login-sub').textContent = '';
+  document.getElementById('login-users').style.display = 'none';
+  document.getElementById('login-pin').style.display = 'flex';
+  document.getElementById('pin-avatar').textContent = initialsOf(u.nombre);
+  document.getElementById('pin-name').textContent = u.nombre;
+  document.getElementById('pin-err').textContent = '';
+  renderPinDots();
+}
+
+function renderPinDots(errorFlash) {
+  const dots = document.querySelectorAll('#pin-dots .pin-dot');
+  dots.forEach((d, i) => {
+    d.className = 'pin-dot'
+      + (i < PIN_BUF.length ? ' filled' : '')
+      + (errorFlash ? ' error' : '');
+  });
+}
+
+function pinDigit(d) {
+  if (!SEL_USER) return;
+  if (PIN_BUF.length >= 4) return;
+  PIN_BUF += d;
+  renderPinDots();
+  if (PIN_BUF.length === 4) tryLogin();
+}
+function pinBack() {
+  PIN_BUF = PIN_BUF.slice(0, -1);
+  renderPinDots();
+  document.getElementById('pin-err').textContent = '';
+}
+
+async function tryLogin() {
+  const errEl = document.getElementById('pin-err');
+  errEl.textContent = '';
+  try {
+    const res = await api('login', { user: SEL_USER.user, pin: PIN_BUF });
+    SESSION = { user: res.user, nombre: res.nombre };
+    saveSession(SESSION);
+    PIN_BUF = '';
+    enterApp();
+  } catch (err) {
+    errEl.textContent = err.message || 'PIN incorrecto';
+    renderPinDots(true);
+    const pad = document.getElementById('login-pin');
+    pad.classList.add('pin-shake');
+    setTimeout(() => { pad.classList.remove('pin-shake'); PIN_BUF = ''; renderPinDots(); }, 420);
+  }
+}
+
+// soporte de teclado físico (PC / tablet con teclado)
+document.addEventListener('keydown', (e) => {
+  if (!document.getElementById('login-view').classList.contains('open')) return;
+  if (!SEL_USER) return;
+  if (/^[0-9]$/.test(e.key)) { pinDigit(e.key); e.preventDefault(); }
+  else if (e.key === 'Backspace') { pinBack(); e.preventDefault(); }
+});
+
+// ============== LOGOUT ==============
+function confirmLogout() {
+  if (!confirm('¿Cerrar sesión?')) return;
+  clearSession();
+  SESSION = null;
+  document.getElementById('app-root').classList.add('app-hidden');
+  bootLogin();
+}
+
+// ============== INICIO ==============
+async function enterApp() {
+  document.getElementById('login-view').classList.remove('open');
+  document.getElementById('app-root').classList.remove('app-hidden');
+  // pintar chip de usuario
+  document.getElementById('hdr-avatar').textContent = initialsOf(SESSION.nombre);
+  document.getElementById('hdr-nombre').textContent = SESSION.nombre;
+  await init();
+}
+
+async function init() {
+  try {
+    const [productos, zonas, obras, categorias, stock, reservasDetalle] = await Promise.all([
+      api('getProducts'),
+      api('getZones'),
+      api('getObras'),
+      api('getCategorias'),
+      api('getStock'),
+      api('getReservasDetalle').catch(() => []),  // si el backend viejo no lo tiene, no rompe
+    ]);
+    STATE.productos = productos;
+    STATE.zonas = zonas;
+    STATE.obras = obras;
+    STATE.categorias = categorias;
+    STATE.stock = stock;
+    STATE.reservasDetalle = reservasDetalle || [];
+    renderZonas();
+    renderCategorias();
+    renderStock();
+    renderProductos();
+    renderZonasView();
+    renderObrasView();
+    return true;
+  } catch (err) {
+    document.getElementById('stock-list').innerHTML = `<div class="alert alert-err">${attrEsc(err.message)}</div>`;
+    return false;
+  }
+}
+
+// ============== HELPERS STOCK ==============
+function getStockRow(sku) { return STATE.stock.find(x => x.SKU === sku); }
+function getStockEnZona(sku, zona) { const r = getStockRow(sku); return r ? Number(r[zona] || 0) : 0; }
+function getZonasConStock(sku) {
+  const r = getStockRow(sku);
+  if (!r) return [];
+  return STATE.zonas.filter(z => Number(r[z.Codigo] || 0) > 0);
+}
+function productosConStock() {
+  return STATE.productos.filter(p => {
+    const r = getStockRow(p.SKU);
+    return r && Number(r.Disponible || 0) > 0;
+  });
+}
+function productosConReserva() {
+  // Preferimos el detalle de reservas (vigentes) para evitar mostrar
+  // productos que quedaron con "Reservado" desfasado en Stock_Actual.
+  if (STATE.reservasDetalle && STATE.reservasDetalle.length) {
+    const skus = new Set(STATE.reservasDetalle.map(r => r.SKU));
+    return STATE.productos.filter(p => skus.has(p.SKU));
+  }
+  return STATE.productos.filter(p => {
+    const r = getStockRow(p.SKU);
+    return r && Number(r.Reservado || 0) > 0;
+  });
+}
+
+// Zonas donde hay reserva vigente del SKU dado.
+function zonasConReserva(sku) {
+  if (!sku || !STATE.reservasDetalle) return [];
+  const cods = new Set(STATE.reservasDetalle.filter(r => r.SKU === sku).map(r => r.Zona));
+  return STATE.zonas.filter(z => cods.has(z.Codigo));
+}
+
+// Obras donde hay reserva vigente del SKU en la zona dada (si zona vacía, todas).
+function obrasConReserva(sku, zona) {
+  if (!sku || !STATE.reservasDetalle) return [];
+  const obras = new Set(
+    STATE.reservasDetalle
+      .filter(r => r.SKU === sku && (!zona || r.Zona === zona))
+      .map(r => r.Obra)
+  );
+  return STATE.obras.filter(o => obras.has(o.Codigo));
+}
+
+// Cantidad reservada vigente para SKU + zona + obra (0 si no hay).
+function reservaVigente(sku, zona, obra) {
+  if (!STATE.reservasDetalle) return 0;
+  const row = STATE.reservasDetalle.find(r => r.SKU === sku && r.Zona === zona && r.Obra === obra);
+  return row ? Number(row.Cantidad || 0) : 0;
+}
+
+// ============== COMBOBOX (input + dropdown con búsqueda predictiva) ==============
+window._comboData = {};
+window._comboCallbacks = {};
+
+function comboInit(hiddenId, items, selectedValue, callback) {
+  window._comboData[hiddenId] = items || [];
+  window._comboCallbacks[hiddenId] = callback || null;
+  const hidden = document.getElementById(hiddenId);
+  const search = document.getElementById(hiddenId + '-search');
+  if (!hidden || !search) return;
+  hidden.value = '';
+  search.value = '';
+  if (selectedValue) {
+    const sel = (items || []).find(it => it.value === selectedValue);
+    if (sel) {
+      hidden.value = sel.value;
+      search.value = sel.label;
+    }
+  }
+}
+
+function comboFilter(hiddenId, text, showAll) {
+  const items = window._comboData[hiddenId] || [];
+  const list = document.getElementById(hiddenId + '-list');
+  const hidden = document.getElementById(hiddenId);
+  if (!list) return;
+  // Si el usuario edita el texto, invalido la selección previa (va a tener que re-elegir)
+  if (!showAll && hidden) hidden.value = '';
+  const t = (text || '').toLowerCase().trim();
+  let filtered = items;
+  if (t) {
+    filtered = items.filter(it => (it.hay || it.label || '').toLowerCase().includes(t));
+  }
+  if (filtered.length === 0) {
+    list.innerHTML = '<div class="combo-empty">Sin resultados</div>';
+  } else {
+    list.innerHTML = filtered.slice(0, 80).map(it =>
+      `<div class="combo-item" onmousedown="event.preventDefault()" onclick='comboSelect(${jsStr(hiddenId)}, ${jsStr(it.value)})'>${attrEsc(it.label)}</div>`
+    ).join('');
+  }
+  list.classList.add('open');
+}
+
+function comboSelect(hiddenId, value) {
+  const items = window._comboData[hiddenId] || [];
+  const sel = items.find(it => it.value === value);
+  const hidden = document.getElementById(hiddenId);
+  const search = document.getElementById(hiddenId + '-search');
+  const list = document.getElementById(hiddenId + '-list');
+  if (hidden) hidden.value = value;
+  if (search) search.value = sel ? sel.label : value;
+  if (list) list.classList.remove('open');
+  const cb = window._comboCallbacks[hiddenId];
+  if (cb) cb();
+}
+
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.combo')) {
+    document.querySelectorAll('.combo-list.open').forEach(l => l.classList.remove('open'));
+  }
+});
+
+// ============== RENDER: STOCK ==============
+function renderZonas() {
+  const tabs = document.getElementById('zona-tabs');
+  tabs.innerHTML = '';
+  const all = [{Codigo:'TODAS', Nombre:'Todas'}, ...STATE.zonas];
+  all.forEach(z => {
+    const t = document.createElement('button');
+    t.className = 'tab' + (STATE.currentZone === z.Codigo ? ' active' : '');
+    t.textContent = z.Nombre;
+    t.onclick = () => { STATE.currentZone = z.Codigo; renderZonas(); renderStock(); };
+    tabs.appendChild(t);
+  });
+  const alert = document.createElement('button');
+  alert.className = 'tab' + (STATE.currentZone === 'ALERTAS' ? ' active' : '');
+  alert.textContent = '⚠ Alertas';
+  alert.onclick = () => { STATE.currentZone = 'ALERTAS'; renderZonas(); renderStock(); };
+  tabs.appendChild(alert);
+}
+
+function renderCategorias() {
+  const sel = document.getElementById('cat-filter');
+  const cats = [...new Set(STATE.categorias.map(c => c.Categoria))];
+  sel.innerHTML = '<option value="">Todas las categorías</option>' +
+    cats.map(c => `<option value="${attrEsc(c)}">${attrEsc(c)}</option>`).join('');
+}
+
+function renderStock() {
+  const list = document.getElementById('stock-list');
+  const search = (document.getElementById('search-input').value || '').toLowerCase();
+  const cat = document.getElementById('cat-filter').value;
+  let rows = STATE.stock.filter(r => r.SKU);
+  if (STATE.currentZone === 'ALERTAS') rows = rows.filter(r => r.Alerta === 'BAJO STOCK');
+  if (search) rows = rows.filter(r =>
+    (r.Nombre || '').toString().toLowerCase().includes(search) ||
+    (r.SKU || '').toString().toLowerCase().includes(search));
+  if (cat) rows = rows.filter(r => r.Categoria === cat);
+  if (STATE.currentZone !== 'TODAS' && STATE.currentZone !== 'ALERTAS') {
+    rows = rows.filter(r => Number(r[STATE.currentZone] || 0) > 0);
+  }
+  if (rows.length === 0) { list.innerHTML = '<div class="empty">Sin resultados</div>'; return; }
+  list.innerHTML = rows.map(r => {
+    const prod = STATE.productos.find(p => p.SKU === r.SKU) || {};
+    const foto = prod.Foto_URL || NO_FOTO;
+    const chips = STATE.zonas
+      .filter(z => Number(r[z.Codigo] || 0) > 0)
+      .map(z => `<span class="chip">${attrEsc(z.Nombre)}: ${r[z.Codigo]}</span>`).join('');
+    const alerta = r.Alerta === 'BAJO STOCK' ? '<span class="badge-warn">Bajo stock</span>' : '';
+    return `
+      <div class="card" onclick='showDetalle(${jsStr(r.SKU)})'>
+        <img src="${attrEsc(foto)}" alt="" onerror="this.src=window.NO_FOTO">
+        <div class="info">
+          <div class="title">${attrEsc(r.Nombre || r.SKU)} ${alerta}</div>
+          <div class="sub">${attrEsc(r.SKU)} · ${attrEsc(r.Categoria || '')}</div>
+          <div class="chips">${chips || '<span class="chip">Sin stock</span>'}</div>
+        </div>
+        <div class="totals">
+          <div class="total-big">${Number(r.Disponible || 0)}</div>
+          <div class="unit">${attrEsc(r.Unidad || '')} disp.</div>
+          ${Number(r.Reservado || 0) > 0 ? `<div class="unit" style="color:var(--purple)">Res: ${r.Reservado}</div>` : ''}
+        </div>
+      </div>`;
+  }).join('');
+}
+
+// ============== DETALLE PRODUCTO ==============
+function showDetalle(sku) {
+  const r = getStockRow(sku);
+  if (!r) return;
+  const prod = STATE.productos.find(p => p.SKU === sku) || {};
+  const zonasRows = STATE.zonas.map(z =>
+    `<div class="row"><span>${attrEsc(z.Nombre)}</span><strong>${r[z.Codigo] || 0}</strong></div>`).join('');
+  const packInfo = prod.Unidad_Pack && prod.Cantidad_Por_Pack
+    ? `<div class="hint-strong">📦 1 ${attrEsc(prod.Unidad_Pack)} = ${prod.Cantidad_Por_Pack} ${attrEsc(prod.Unidad || '')}</div>`
+    : '';
+  openModal(`
+    <h2>${attrEsc(r.Nombre || prod.Nombre || sku)}</h2>
+    <div class="sub" style="color:var(--muted);margin-bottom:10px;">${attrEsc(r.SKU)} · ${attrEsc(r.Categoria || '')}</div>
+    ${prod.Foto_URL ? `<img src="${attrEsc(prod.Foto_URL)}" class="foto-preview" onerror="this.src=window.NO_FOTO">` : ''}
+    ${packInfo}
+    <div class="detail-rows">
+      ${zonasRows}
+      <div class="row"><strong>Total físico</strong><strong>${r.Total_Fisico || 0}</strong></div>
+      <div class="row"><span>Reservado</span><span style="color:var(--purple)">${r.Reservado || 0}</span></div>
+      <div class="row"><strong>Disponible</strong><strong style="color:var(--primary)">${r.Disponible || 0}</strong></div>
+      <div class="row"><span>Mínimo</span><span>${r.Minimo || 0}</span></div>
+    </div>
+    <div class="btn-row" style="margin-top:12px;">
+      <button class="btn btn-purple" onclick='openReservaMasiva(${jsStr(sku)})'>📌 Reservar</button>
+      <button class="btn btn-secondary" onclick='openLiberaMasiva(${jsStr(sku)})'>↺ Liberar</button>
+    </div>
+    <div class="btn-row" style="margin-top:8px;">
+      <button class="btn btn-accent" onclick='openSubirFoto(${jsStr(sku)})'>${prod.Foto_URL ? '📷 Cambiar foto' : '📷 Foto'}</button>
+      ${prod.QR_URL ? '' : `<button class="btn btn-primary" onclick='generarQRProducto(${jsStr(sku)})'>🔗 QR</button>`}
+    </div>
+    ${prod.QR_URL ? `
+      <div class="alert alert-ok" style="margin-top:8px;">QR ya generado ✓</div>
+      <img src="${attrEsc(prod.QR_URL)}" class="qr-preview" alt="QR ${attrEsc(sku)}" onerror="this.style.display='none'">
+      <div class="btn-row">
+        <a class="btn btn-secondary" href="${attrEsc(prod.QR_URL)}" target="_blank" style="text-align:center;text-decoration:none;line-height:1;padding:14px 10px;">Ver en Drive</a>
+      </div>
+    ` : ''}
+    <div id="qr-container"></div>
+    <div class="btn-row" style="margin-top:12px;">
+      <button class="btn btn-secondary" onclick="closeModal()">Cerrar</button>
+    </div>
+  `);
+}
+
+// ============== MOVIMIENTOS ==============
+function openMovimiento(tipo, skuPreseleccionado) {
+  if (tipo === 'Egreso') { openEgresoMasivo(skuPreseleccionado); return; }
+
+  // Filtrado según tipo: para Libera_Reserva solo los que tienen reserva (no stock)
+  let productosList;
+  if (tipo === 'Libera_Reserva') productosList = productosConReserva();
+  else if (tipo === 'Traslado' || tipo === 'Reserva') productosList = productosConStock();
+  else productosList = STATE.productos;
+  const zonaOptions = STATE.zonas.map(z => `<option value="${attrEsc(z.Codigo)}">${attrEsc(z.Nombre)}</option>`).join('');
+  const obraOptions = STATE.obras.filter(o => o.Estado !== 'Finalizada')
+    .map(o => `<option value="${attrEsc(o.Codigo)}">${attrEsc(o.Codigo)} — ${attrEsc(o.Nombre)}</option>`).join('');
+
+  let packBlock = '';
+  if (tipo === 'Ingreso' || tipo === 'Traslado') {
+    packBlock = `
+      <div class="toggle-row" id="pack-toggle-row" style="display:none;">
+        <input type="checkbox" id="f-usar-pack" onchange="actualizarPackIngreso()">
+        <label for="f-usar-pack" id="pack-label">Cargar por pack</label>
+      </div>
+      <div id="pack-result" class="hint" style="margin-top:-4px;"></div>
+    `;
+  }
+
+  let formFields = `
+    <div class="field">
+      <label>Producto ${tipo === 'Libera_Reserva' ? '(con reserva vigente)' : ''}</label>
+      <div class="row-with-btn">
+        <div class="combo" style="flex:1;position:relative;">
+          <input type="hidden" id="f-sku">
+          <input type="text" id="f-sku-search" placeholder="Buscá por nombre o SKU..." autocomplete="off"
+                 oninput="comboFilter('f-sku', this.value)" onfocus="comboFilter('f-sku', '', true)">
+          <div id="f-sku-list" class="combo-list"></div>
+        </div>
+        <button type="button" onclick="openNuevoProducto()">+ Nuevo</button>
+      </div>
+      <div class="hint" id="f-sku-hint">${productosList.length === 0 ? (tipo === 'Libera_Reserva' ? 'No hay productos con reservas vigentes.' : 'Sin productos disponibles.') : productosList.length + ' productos disponibles'}</div>
+    </div>
+    ${packBlock}
+    <div class="field">
+      <label><span id="f-cant-label">Cantidad</span></label>
+      <input type="number" id="f-cant" step="0.01" inputmode="decimal" oninput="actualizarPackIngreso(); validarCantMov('${tipo}')">
+      <div class="hint" id="f-cant-hint"></div>
+    </div>
+  `;
+
+  if (tipo === 'Ingreso') {
+    formFields += `<div class="field"><label>Zona destino</label><select id="f-dest"><option value="">-- elegir --</option>${zonaOptions}</select></div>`;
+  } else if (tipo === 'Traslado') {
+    formFields += `
+      <div class="field"><label>Zona origen</label><select id="f-origen" onchange="validarCantMov('Traslado')"><option value="">-- elegir --</option>${zonaOptions}</select></div>
+      <div class="field"><label>Zona destino</label><select id="f-dest"><option value="">-- elegir --</option>${zonaOptions}</select></div>`;
+  } else if (tipo === 'Reserva') {
+    formFields += `
+      <div class="field"><label>Zona origen</label><select id="f-origen" onchange="validarCantMov('Reserva')"><option value="">-- elegir --</option>${zonaOptions}</select></div>
+      <div class="field">
+        <label>Obra</label>
+        <div class="row-with-btn">
+          <select id="f-obra"><option value="">-- elegir --</option>${obraOptions}</select>
+          <button type="button" onclick="openNuevaObra()">+ Nueva</button>
+        </div>
+      </div>`;
+  } else if (tipo === 'Libera_Reserva') {
+    // Arrancan vacíos — se rellenan en onSkuChangeMov/onZonaChangeLiberar
+    // mostrando SÓLO zonas/obras con reserva vigente del SKU elegido.
+    formFields += `
+      <div class="field"><label>Zona origen (con reserva)</label><select id="f-origen" onchange="onZonaChangeLiberar()"><option value="">-- primero elegí un producto --</option></select></div>
+      <div class="field"><label>Obra (con reserva)</label><select id="f-obra"><option value="">-- primero elegí zona --</option></select></div>
+      <div class="hint" id="f-reserva-hint"></div>`;
+  } else if (tipo === 'Ajuste') {
+    formFields += `<div class="field"><label>Zona</label><select id="f-origen"><option value="">-- elegir --</option>${zonaOptions}</select></div>
+                   <div class="field"><label>Motivo</label><select id="f-motivo">
+                     <option value="Rotura">Rotura</option>
+                     <option value="Error conteo">Error conteo</option>
+                     <option value="Pérdida/robo">Pérdida/robo</option>
+                     <option value="Inventario inicial">Inventario inicial</option>
+                   </select></div>
+                   <div class="hint" style="color:var(--warn)">⚠ Para restar stock, poné la cantidad en negativo (ej: -5). Para sumar, positivo.</div>`;
+  }
+
+  formFields += `<div class="field"><label>Notas (opcional)</label><textarea id="f-notas"></textarea></div>`;
+
+  openModal(`
+    <h2>${tipoLabel(tipo)}</h2>
+    <div id="mov-msg"></div>
+    ${formFields}
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" id="btn-guardar-mov" onclick="submitMovimiento('${tipo}')">Guardar</button>
+    </div>
+  `);
+
+  // Inicializo el combobox con los productos filtrados según tipo
+  comboInit('f-sku', productosList.map(p => ({
+    value: p.SKU,
+    label: `${p.SKU} — ${p.Nombre}`,
+    hay: p.Nombre + ' ' + p.SKU + ' ' + (p.Categoria||'') + ' ' + (p.Subcategoria||''),
+  })), skuPreseleccionado, () => onSkuChangeMov(tipo));
+
+  if (skuPreseleccionado) onSkuChangeMov(tipo);
+}
+
+function onSkuChangeMov(tipo) {
+  const sku = document.getElementById('f-sku').value;
+  const prod = STATE.productos.find(p => p.SKU === sku);
+  const hint = document.getElementById('f-sku-hint');
+  const packRow = document.getElementById('pack-toggle-row');
+
+  if (!prod) {
+    if (hint) hint.textContent = '';
+    if (packRow) packRow.style.display = 'none';
+    return;
+  }
+
+  const lbl = document.getElementById('f-cant-label');
+  if (lbl) lbl.textContent = `Cantidad (${prod.Unidad || ''})`;
+
+  if (tipo === 'Ingreso' && prod.Unidad_Pack && Number(prod.Cantidad_Por_Pack) > 0) {
+    if (packRow) {
+      packRow.style.display = 'flex';
+      document.getElementById('pack-label').textContent =
+        `Cargar por ${prod.Unidad_Pack} (1 ${prod.Unidad_Pack} = ${prod.Cantidad_Por_Pack} ${prod.Unidad || ''})`;
+    }
+  } else if (packRow) {
+    packRow.style.display = 'none';
+    const chk = document.getElementById('f-usar-pack');
+    if (chk) chk.checked = false;
+  }
+
+  // En Liberar_Reserva: rellenar zonas/obras SÓLO con las que tienen reserva vigente.
+  if (tipo === 'Libera_Reserva') {
+    const zonasOk = zonasConReserva(sku);
+    const selZ = document.getElementById('f-origen');
+    if (selZ) {
+      selZ.innerHTML = '<option value="">-- elegir --</option>' +
+        zonasOk.map(z => `<option value="${attrEsc(z.Codigo)}">${attrEsc(z.Nombre)}</option>`).join('');
+    }
+    const selO = document.getElementById('f-obra');
+    if (selO) selO.innerHTML = '<option value="">-- primero elegí zona --</option>';
+    const rh = document.getElementById('f-reserva-hint');
+    if (rh) rh.innerHTML = zonasOk.length
+      ? `<span style="color:var(--muted)">Hay reservas en ${zonasOk.length} galp${zonasOk.length === 1 ? 'ón' : 'ones'}.</span>`
+      : '<span style="color:var(--warn)">Este producto no tiene reservas vigentes en ningún galpón.</span>';
+  }
+
+  actualizarPackIngreso();
+  validarCantMov(tipo);
+}
+
+function onZonaChangeLiberar() {
+  const sku = document.getElementById('f-sku').value;
+  const zona = document.getElementById('f-origen').value;
+  const selO = document.getElementById('f-obra');
+  const rh = document.getElementById('f-reserva-hint');
+  if (!sku || !zona) {
+    if (selO) selO.innerHTML = '<option value="">-- primero elegí zona --</option>';
+    return;
+  }
+  const obras = obrasConReserva(sku, zona);
+  if (selO) {
+    selO.innerHTML = '<option value="">-- elegir --</option>' +
+      obras.map(o => `<option value="${attrEsc(o.Codigo)}">${attrEsc(o.Codigo)} — ${attrEsc(o.Nombre)}</option>`).join('');
+    selO.onchange = () => {
+      const obra = selO.value;
+      if (!obra) { if (rh) rh.innerHTML = ''; return; }
+      const vig = reservaVigente(sku, zona, obra);
+      const prod = STATE.productos.find(p => p.SKU === sku) || {};
+      if (rh) rh.innerHTML = `<span style="color:var(--purple)">Reserva vigente en esta combinación: <strong>${vig}</strong> ${attrEsc(prod.Unidad || '')}</span>`;
+    };
+  }
+  if (rh) rh.innerHTML = obras.length
+    ? '<span style="color:var(--muted)">Elegí la obra.</span>'
+    : '<span style="color:var(--warn)">No hay obras con reserva vigente en esta zona.</span>';
+}
+
+function actualizarPackIngreso() {
+  const r = document.getElementById('pack-result');
+  if (!r) return;
+  const chk = document.getElementById('f-usar-pack');
+  const sku = document.getElementById('f-sku').value;
+  const prod = STATE.productos.find(p => p.SKU === sku);
+  const cant = parseFloat(document.getElementById('f-cant').value || '0');
+  if (chk && chk.checked && prod && Number(prod.Cantidad_Por_Pack) > 0 && cant > 0) {
+    const total = cant * Number(prod.Cantidad_Por_Pack);
+    r.innerHTML = `<span style="color:var(--accent);font-weight:600">→ Se van a ingresar <strong>${total}</strong> ${prod.Unidad || ''} (${cant} × ${prod.Cantidad_Por_Pack})</span>`;
+  } else {
+    r.innerHTML = '';
+  }
+}
+
+function validarCantMov(tipo) {
+  const hint = document.getElementById('f-cant-hint');
+  const btn = document.getElementById('btn-guardar-mov');
+  if (!hint || !btn) return;
+  hint.innerHTML = '';
+  btn.disabled = false;
+  if (tipo !== 'Traslado' && tipo !== 'Reserva' && tipo !== 'Libera_Reserva') return;
+
+  const sku = document.getElementById('f-sku').value;
+  const zo = document.getElementById('f-origen') ? document.getElementById('f-origen').value : '';
+  if (!sku || !zo) return;
+
+  const cant = parseFloat(document.getElementById('f-cant').value || '0');
+
+  if (tipo === 'Libera_Reserva') {
+    const obra = document.getElementById('f-obra') ? document.getElementById('f-obra').value : '';
+    if (!obra) return;
+    const vig = reservaVigente(sku, zo, obra);
+    hint.innerHTML = `<span style="color:var(--muted)">Reserva vigente: <strong>${vig}</strong></span>`;
+    if (cant > 0 && cant > vig) {
+      hint.innerHTML = `<span style="color:var(--warn)">⚠ Excede la reserva vigente (${vig}). No vas a poder guardar.</span>`;
+      btn.disabled = true;
+    }
+    return;
+  }
+
+  const disp = getStockEnZona(sku, zo);
+  hint.innerHTML = `<span style="color:var(--muted)">Disponible en esa zona: <strong>${disp}</strong></span>`;
+  if (cant > 0 && cant > disp) {
+    hint.innerHTML = `<span style="color:var(--warn)">⚠ Excede lo disponible (${disp}). No vas a poder guardar.</span>`;
+    btn.disabled = true;
+  }
+}
+
+function tipoLabel(t) {
+  return {
+    Ingreso: '+ Nuevo Ingreso',
+    Traslado: '↔ Traslado entre galpones',
+    Egreso: '→ Egreso a Obra',
+    Ajuste: '± Ajuste de stock',
+    Reserva: '📌 Reservar para Obra',
+    Libera_Reserva: '↺ Liberar reserva',
+  }[t] || t;
+}
+
+async function submitMovimiento(tipo) {
+  try {
+    let cantidad = parseFloat(document.getElementById('f-cant').value || '0');
+    const sku = document.getElementById('f-sku').value;
+    const prod = STATE.productos.find(p => p.SKU === sku);
+
+    if (tipo === 'Ingreso' || tipo === 'Traslado') {
+      const chk = document.getElementById('f-usar-pack');
+      if (chk && chk.checked && prod && Number(prod.Cantidad_Por_Pack) > 0) {
+        cantidad = cantidad * Number(prod.Cantidad_Por_Pack);
+      }
+    }
+
+    const payload = {
+      tipo, sku, cantidad,
+      usuario: SESSION ? SESSION.user : '',
+      notas: document.getElementById('f-notas').value,
+    };
+    if (tipo === 'Ingreso') payload.zonaDestino = document.getElementById('f-dest').value;
+    if (tipo === 'Traslado') {
+      payload.zonaOrigen = document.getElementById('f-origen').value;
+      payload.zonaDestino = document.getElementById('f-dest').value;
+    }
+    if (tipo === 'Reserva' || tipo === 'Libera_Reserva') {
+      payload.zonaOrigen = document.getElementById('f-origen').value;
+      payload.obra = document.getElementById('f-obra').value;
+    }
+    if (tipo === 'Ajuste') {
+      payload.zonaOrigen = document.getElementById('f-origen').value;
+      payload.motivo = document.getElementById('f-motivo').value;
+      // Confirmación: detecta signo → Ingreso/Egreso
+      const signo = cantidad >= 0 ? 'Ingreso' : 'Egreso';
+      const abs = Math.abs(cantidad);
+      const nomProd = prod ? prod.Nombre : sku;
+      const unidad = prod && prod.Unidad ? ' ' + prod.Unidad : '';
+      const motivo = payload.motivo || '(sin motivo)';
+      if (!confirm(`¿Confirmás este ${signo} de ${abs}${unidad} de "${nomProd}" por "${motivo}"?`)) return;
+    }
+    await api('addMovimiento', payload);
+    document.getElementById('mov-msg').innerHTML = `<div class="alert alert-ok">Movimiento registrado ✓</div>`;
+    setTimeout(() => { closeModal(); init(); }, 600);
+  } catch (err) {
+    document.getElementById('mov-msg').innerHTML = `<div class="alert alert-err">${attrEsc(err.message)}</div>`;
+  }
+}
+
+// ============== EGRESO MASIVO ==============
+function openEgresoMasivo(skuPreseleccionado) {
+  STATE.egresoBasket = [];
+  if (skuPreseleccionado) {
+    const prod = STATE.productos.find(p => p.SKU === skuPreseleccionado);
+    if (prod) {
+      const zonas = getZonasConStock(skuPreseleccionado);
+      if (zonas.length > 0) {
+        STATE.egresoBasket.push({ sku: skuPreseleccionado, zona: zonas[0].Codigo, cantidad: '' });
+      }
+    }
+  }
+  if (STATE.egresoBasket.length === 0) {
+    STATE.egresoBasket.push({ sku: '', zona: '', cantidad: '' });
+  }
+
+  const obraOptions = STATE.obras.filter(o => o.Estado !== 'Finalizada')
+    .map(o => `<option value="${attrEsc(o.Codigo)}">${attrEsc(o.Codigo)} — ${attrEsc(o.Nombre)}</option>`).join('');
+
+  openModal(`
+    <h2>→ Egreso a Obra</h2>
+    <div id="mov-msg"></div>
+    <div class="field">
+      <label>Obra *</label>
+      <div class="row-with-btn">
+        <select id="eg-obra"><option value="">-- elegir --</option>${obraOptions}</select>
+        <button type="button" onclick="openNuevaObra()">+ Nueva</button>
+      </div>
+    </div>
+    <div class="field"><label>Notas (se aplican a todos)</label><textarea id="eg-notas" placeholder="ej: remito, camión, quien retiró"></textarea></div>
+    <h3 style="color:var(--orange);font-size:15px;margin:10px 0 6px;">🛒 Productos a retirar</h3>
+    <div id="eg-basket"></div>
+    <button class="add-line-btn" onclick="egregarLinea()">+ Agregar otro producto</button>
+    <div class="hint" id="eg-summary" style="text-align:right;"></div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-orange" id="eg-btn" onclick="submitEgresoMasivo()">Guardar todo</button>
+    </div>
+  `);
+  renderEgresoBasket();
+}
+
+function egregarLinea() { STATE.egresoBasket.push({ sku: '', zona: '', cantidad: '' }); renderEgresoBasket(); }
+function egQuitarLinea(idx) {
+  STATE.egresoBasket.splice(idx, 1);
+  if (STATE.egresoBasket.length === 0) egregarLinea();
+  renderEgresoBasket();
+}
+function onEgSkuChange(idx, value) {
+  STATE.egresoBasket[idx].sku = value;
+  const zonas = getZonasConStock(value);
+  const actual = STATE.egresoBasket[idx].zona;
+  if (!zonas.find(z => z.Codigo === actual)) {
+    STATE.egresoBasket[idx].zona = zonas.length > 0 ? zonas[0].Codigo : '';
+  }
+  renderEgresoBasket();
+}
+function onEgZonaChange(idx, value) { STATE.egresoBasket[idx].zona = value; renderEgresoBasket(); }
+function onEgCantChange(idx, value) { STATE.egresoBasket[idx].cantidad = value; validarEgresoBasket(); }
+
+function renderEgresoBasket() {
+  const c = document.getElementById('eg-basket');
+  if (!c) return;
+  const prodElegibles = productosConStock();
+
+  c.innerHTML = STATE.egresoBasket.map((line, idx) => {
+    const prod = STATE.productos.find(p => p.SKU === line.sku);
+    const zonasConStock = line.sku ? getZonasConStock(line.sku) : [];
+
+    const prodOpts = prodElegibles.map(p =>
+      `<option value="${attrEsc(p.SKU)}" ${line.sku === p.SKU ? 'selected' : ''}>${attrEsc(p.SKU)} — ${attrEsc(p.Nombre)}</option>`
+    ).join('');
+
+    const zonaOpts = zonasConStock.map(z => {
+      const st = getStockEnZona(line.sku, z.Codigo);
+      return `<option value="${attrEsc(z.Codigo)}" ${line.zona === z.Codigo ? 'selected' : ''}>${attrEsc(z.Nombre)} (disp: ${st})</option>`;
+    }).join('');
+
+    const dispLinea = line.sku && line.zona ? getStockEnZona(line.sku, line.zona) : 0;
+    const cantNum = parseFloat(line.cantidad || '0');
+    const excede = cantNum > 0 && cantNum > dispLinea;
+
+    return `
+      <div class="basket-line">
+        <button class="del-x" onclick="egQuitarLinea(${idx})" title="Quitar">✕</button>
+        <div class="head">Producto ${idx + 1}</div>
+        <div class="field">
+          <select onchange="onEgSkuChange(${idx}, this.value)">
+            <option value="">-- elegir producto --</option>
+            ${prodElegibles.length === 0 ? '<option disabled>No hay productos con stock</option>' : ''}
+            ${prodOpts}
+          </select>
+        </div>
+        ${line.sku ? `
+          <div class="field-row">
+            <div class="field">
+              <label>Zona origen</label>
+              <select onchange="onEgZonaChange(${idx}, this.value)">
+                ${zonasConStock.length ? zonaOpts : '<option value="">Sin stock en ningún galpón</option>'}
+              </select>
+            </div>
+            <div class="field">
+              <label>Cantidad${prod ? ' (' + attrEsc(prod.Unidad || '') + ')' : ''}</label>
+              <input type="number" step="0.01" inputmode="decimal" value="${attrEsc(line.cantidad)}" oninput="onEgCantChange(${idx}, this.value)">
+            </div>
+          </div>
+          ${excede ? `<div class="alert alert-err" style="margin:4px 0 0;">⚠ Excede lo disponible (${dispLinea} ${prod ? attrEsc(prod.Unidad || '') : ''})</div>` : ''}
+        ` : ''}
+      </div>`;
+  }).join('');
+
+  validarEgresoBasket();
+}
+
+function validarEgresoBasket() {
+  const btn = document.getElementById('eg-btn');
+  const sum = document.getElementById('eg-summary');
+  if (!btn) return;
+  let anyLineOk = false, anyBad = false;
+  const acc = {};
+  for (const l of STATE.egresoBasket) {
+    const cant = parseFloat(l.cantidad || '0');
+    if (!l.sku || !l.zona || !(cant > 0)) continue;
+    const key = l.sku + '||' + l.zona;
+    acc[key] = (acc[key] || 0) + cant;
+    anyLineOk = true;
+  }
+  for (const key of Object.keys(acc)) {
+    const [sku, zona] = key.split('||');
+    if (acc[key] > getStockEnZona(sku, zona)) anyBad = true;
+  }
+  btn.disabled = !anyLineOk || anyBad;
+  if (sum) {
+    const lineasOk = Object.keys(acc).length;
+    sum.textContent = lineasOk ? `${lineasOk} ${lineasOk === 1 ? 'producto listo' : 'productos listos'} para egresar` : '';
+  }
+}
+
+async function submitEgresoMasivo() {
+  const obra = document.getElementById('eg-obra').value;
+  const notas = document.getElementById('eg-notas').value;
+  if (!obra) { document.getElementById('mov-msg').innerHTML = '<div class="alert alert-err">Elegí una obra</div>'; return; }
+
+  const lineas = STATE.egresoBasket.filter(l => {
+    const c = parseFloat(l.cantidad || '0');
+    return l.sku && l.zona && c > 0;
+  });
+  if (lineas.length === 0) { document.getElementById('mov-msg').innerHTML = '<div class="alert alert-err">Cargá al menos un producto</div>'; return; }
+
+  document.getElementById('mov-msg').innerHTML = `<div class="alert alert-info">Guardando ${lineas.length} egresos...</div>`;
+
+  let okCount = 0, errs = [];
+  for (const l of lineas) {
+    try {
+      await api('addMovimiento', {
+        tipo: 'Egreso', sku: l.sku, cantidad: parseFloat(l.cantidad),
+        zonaOrigen: l.zona, obra,
+        usuario: SESSION ? SESSION.user : '',
+        notas,
+      });
+      okCount++;
+    } catch (err) {
+      errs.push(`${l.sku}: ${err.message}`);
+    }
+  }
+  if (errs.length === 0) {
+    document.getElementById('mov-msg').innerHTML = `<div class="alert alert-ok">${okCount} egresos registrados ✓</div>`;
+    setTimeout(() => { closeModal(); init(); }, 700);
+  } else {
+    document.getElementById('mov-msg').innerHTML =
+      `<div class="alert alert-ok">${okCount} OK</div>` +
+      `<div class="alert alert-err">${errs.length} con error:<br>${errs.map(attrEsc).join('<br>')}</div>`;
+    init();
+  }
+}
+
+// ============== RESERVA MASIVA (estilo Egreso, una obra, varios productos) ==============
+function openReservaMasiva(skuPreseleccionado) {
+  STATE.reservaBasket = [];
+  if (skuPreseleccionado) {
+    const zonas = getZonasConStock(skuPreseleccionado);
+    if (zonas.length > 0) {
+      STATE.reservaBasket.push({ sku: skuPreseleccionado, zona: zonas[0].Codigo, cantidad: '' });
+    } else {
+      STATE.reservaBasket.push({ sku: skuPreseleccionado, zona: '', cantidad: '' });
+    }
+  }
+  if (STATE.reservaBasket.length === 0) {
+    STATE.reservaBasket.push({ sku: '', zona: '', cantidad: '' });
+  }
+
+  const obraOptions = STATE.obras.filter(o => o.Estado !== 'Finalizada')
+    .map(o => `<option value="${attrEsc(o.Codigo)}">${attrEsc(o.Codigo)} — ${attrEsc(o.Nombre)}</option>`).join('');
+
+  openModal(`
+    <h2>📌 Reservar para Obra</h2>
+    <div id="mov-msg"></div>
+    <div class="field">
+      <label>Obra *</label>
+      <div class="row-with-btn">
+        <select id="rv-obra"><option value="">-- elegir --</option>${obraOptions}</select>
+        <button type="button" onclick="openNuevaObra()">+ Nueva</button>
+      </div>
+    </div>
+    <div class="field"><label>Notas (se aplican a todos)</label><textarea id="rv-notas" placeholder="ej: motivo de la reserva"></textarea></div>
+    <h3 style="color:var(--purple);font-size:15px;margin:10px 0 6px;">🛒 Productos a reservar</h3>
+    <div id="rv-basket"></div>
+    <button class="add-line-btn" onclick="rvAgregarLinea()">+ Agregar otro producto</button>
+    <div class="hint" id="rv-summary" style="text-align:right;"></div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-purple" id="rv-btn" onclick="submitReservaMasiva()">Guardar todo</button>
+    </div>
+  `);
+  renderReservaBasket();
+}
+
+function rvAgregarLinea() { STATE.reservaBasket.push({ sku: '', zona: '', cantidad: '' }); renderReservaBasket(); }
+function rvQuitarLinea(idx) {
+  STATE.reservaBasket.splice(idx, 1);
+  if (STATE.reservaBasket.length === 0) rvAgregarLinea();
+  renderReservaBasket();
+}
+function onRvSkuChange(idx, value) {
+  STATE.reservaBasket[idx].sku = value;
+  const zonas = getZonasConStock(value);
+  const actual = STATE.reservaBasket[idx].zona;
+  if (!zonas.find(z => z.Codigo === actual)) {
+    STATE.reservaBasket[idx].zona = zonas.length > 0 ? zonas[0].Codigo : '';
+  }
+  renderReservaBasket();
+}
+function onRvZonaChange(idx, value) { STATE.reservaBasket[idx].zona = value; renderReservaBasket(); }
+function onRvCantChange(idx, value) { STATE.reservaBasket[idx].cantidad = value; validarReservaBasket(); }
+
+function renderReservaBasket() {
+  const c = document.getElementById('rv-basket');
+  if (!c) return;
+  const prodElegibles = productosConStock();
+
+  c.innerHTML = STATE.reservaBasket.map((line, idx) => {
+    const prod = STATE.productos.find(p => p.SKU === line.sku);
+    const zonasConStock = line.sku ? getZonasConStock(line.sku) : [];
+
+    const prodOpts = prodElegibles.map(p =>
+      `<option value="${attrEsc(p.SKU)}" ${line.sku === p.SKU ? 'selected' : ''}>${attrEsc(p.SKU)} — ${attrEsc(p.Nombre)}</option>`
+    ).join('');
+
+    const zonaOpts = zonasConStock.map(z => {
+      const st = getStockEnZona(line.sku, z.Codigo);
+      return `<option value="${attrEsc(z.Codigo)}" ${line.zona === z.Codigo ? 'selected' : ''}>${attrEsc(z.Nombre)} (disp: ${st})</option>`;
+    }).join('');
+
+    const dispLinea = line.sku && line.zona ? getStockEnZona(line.sku, line.zona) : 0;
+    const cantNum = parseFloat(line.cantidad || '0');
+    const excede = cantNum > 0 && cantNum > dispLinea;
+
+    return `
+      <div class="basket-line">
+        <button class="del-x" onclick="rvQuitarLinea(${idx})" title="Quitar">✕</button>
+        <div class="head">Producto ${idx + 1}</div>
+        <div class="field">
+          <select onchange="onRvSkuChange(${idx}, this.value)">
+            <option value="">-- elegir producto --</option>
+            ${prodElegibles.length === 0 ? '<option disabled>No hay productos con stock</option>' : ''}
+            ${prodOpts}
+          </select>
+        </div>
+        ${line.sku ? `
+          <div class="field-row">
+            <div class="field">
+              <label>Zona origen</label>
+              <select onchange="onRvZonaChange(${idx}, this.value)">
+                ${zonasConStock.length ? zonaOpts : '<option value="">Sin stock en ningún galpón</option>'}
+              </select>
+            </div>
+            <div class="field">
+              <label>Cantidad${prod ? ' (' + attrEsc(prod.Unidad || '') + ')' : ''}</label>
+              <input type="number" step="0.01" inputmode="decimal" value="${attrEsc(line.cantidad)}" oninput="onRvCantChange(${idx}, this.value)">
+            </div>
+          </div>
+          ${excede ? `<div class="alert alert-err" style="margin:4px 0 0;">⚠ Excede lo disponible (${dispLinea} ${prod ? attrEsc(prod.Unidad || '') : ''})</div>` : ''}
+        ` : ''}
+      </div>`;
+  }).join('');
+
+  validarReservaBasket();
+}
+
+function validarReservaBasket() {
+  const btn = document.getElementById('rv-btn');
+  const sum = document.getElementById('rv-summary');
+  if (!btn) return;
+  let anyLineOk = false, anyBad = false;
+  const acc = {};
+  for (const l of STATE.reservaBasket) {
+    const cant = parseFloat(l.cantidad || '0');
+    if (!l.sku || !l.zona || !(cant > 0)) continue;
+    const key = l.sku + '||' + l.zona;
+    acc[key] = (acc[key] || 0) + cant;
+    anyLineOk = true;
+  }
+  for (const key of Object.keys(acc)) {
+    const [sku, zona] = key.split('||');
+    if (acc[key] > getStockEnZona(sku, zona)) anyBad = true;
+  }
+  btn.disabled = !anyLineOk || anyBad;
+  if (sum) {
+    const n = Object.keys(acc).length;
+    sum.textContent = n ? `${n} ${n === 1 ? 'producto listo' : 'productos listos'} para reservar` : '';
+  }
+}
+
+async function submitReservaMasiva() {
+  const obra = document.getElementById('rv-obra').value;
+  const notas = document.getElementById('rv-notas').value;
+  if (!obra) { document.getElementById('mov-msg').innerHTML = '<div class="alert alert-err">Elegí una obra</div>'; return; }
+
+  const lineas = STATE.reservaBasket.filter(l => {
+    const c = parseFloat(l.cantidad || '0');
+    return l.sku && l.zona && c > 0;
+  });
+  if (lineas.length === 0) { document.getElementById('mov-msg').innerHTML = '<div class="alert alert-err">Cargá al menos un producto</div>'; return; }
+
+  document.getElementById('mov-msg').innerHTML = `<div class="alert alert-info">Guardando ${lineas.length} reservas...</div>`;
+
+  let okCount = 0, errs = [];
+  for (const l of lineas) {
+    try {
+      await api('addMovimiento', {
+        tipo: 'Reserva', sku: l.sku, cantidad: parseFloat(l.cantidad),
+        zonaOrigen: l.zona, obra,
+        usuario: SESSION ? SESSION.user : '',
+        notas,
+      });
+      okCount++;
+    } catch (err) {
+      errs.push(`${l.sku}: ${err.message}`);
+    }
+  }
+  if (errs.length === 0) {
+    document.getElementById('mov-msg').innerHTML = `<div class="alert alert-ok">${okCount} reservas registradas ✓</div>`;
+    setTimeout(() => { closeModal(); init(); }, 700);
+  } else {
+    document.getElementById('mov-msg').innerHTML =
+      `<div class="alert alert-ok">${okCount} OK</div>` +
+      `<div class="alert alert-err">${errs.length} con error:<br>${errs.map(attrEsc).join('<br>')}</div>`;
+    init();
+  }
+}
+
+// ============== LIBERAR RESERVA MASIVO ==============
+// Cada línea lleva {sku, zona, obra, cantidad}. Las tres primeras se
+// eligen desde las reservas vigentes (STATE.reservasDetalle).
+function openLiberaMasiva(skuPreseleccionado) {
+  STATE.liberaBasket = [];
+  if (skuPreseleccionado) {
+    // Pre-cargo una línea con el producto y, si hay una sola
+    // combinación (zona+obra) de reserva, la uso de default.
+    const reservas = (STATE.reservasDetalle || []).filter(r => r.SKU === skuPreseleccionado);
+    if (reservas.length === 1) {
+      STATE.liberaBasket.push({ sku: skuPreseleccionado, zona: reservas[0].Zona, obra: reservas[0].Obra, cantidad: '' });
+    } else {
+      STATE.liberaBasket.push({ sku: skuPreseleccionado, zona: '', obra: '', cantidad: '' });
+    }
+  }
+  if (STATE.liberaBasket.length === 0) {
+    STATE.liberaBasket.push({ sku: '', zona: '', obra: '', cantidad: '' });
+  }
+
+  openModal(`
+    <h2>↺ Liberar reservas</h2>
+    <div id="mov-msg"></div>
+    <div class="field"><label>Notas (se aplican a todas)</label><textarea id="lr-notas" placeholder="ej: motivo de la liberación"></textarea></div>
+    <h3 style="color:#475569;font-size:15px;margin:10px 0 6px;">🛒 Reservas a liberar</h3>
+    <div id="lr-basket"></div>
+    <button class="add-line-btn" onclick="lrAgregarLinea()">+ Agregar otra reserva</button>
+    <div class="hint" id="lr-summary" style="text-align:right;"></div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-purple" id="lr-btn" onclick="submitLiberaMasiva()">Liberar todo</button>
+    </div>
+  `);
+  renderLiberaBasket();
+}
+
+function lrAgregarLinea() { STATE.liberaBasket.push({ sku: '', zona: '', obra: '', cantidad: '' }); renderLiberaBasket(); }
+function lrQuitarLinea(idx) {
+  STATE.liberaBasket.splice(idx, 1);
+  if (STATE.liberaBasket.length === 0) lrAgregarLinea();
+  renderLiberaBasket();
+}
+function onLrSkuChange(idx, value) {
+  STATE.liberaBasket[idx].sku = value;
+  // Si al cambiar el SKU la zona actual ya no tiene reserva, la limpio
+  const zonas = zonasConReserva(value);
+  if (!zonas.find(z => z.Codigo === STATE.liberaBasket[idx].zona)) {
+    // Si hay una sola zona con reserva, la elijo; si hay una sola combinación zona+obra, las dos
+    if (zonas.length === 1) STATE.liberaBasket[idx].zona = zonas[0].Codigo;
+    else STATE.liberaBasket[idx].zona = '';
+    STATE.liberaBasket[idx].obra = '';
+  }
+  const obras = obrasConReserva(value, STATE.liberaBasket[idx].zona);
+  if (obras.length === 1) STATE.liberaBasket[idx].obra = obras[0].Codigo;
+  renderLiberaBasket();
+}
+function onLrZonaChange(idx, value) {
+  STATE.liberaBasket[idx].zona = value;
+  const obras = obrasConReserva(STATE.liberaBasket[idx].sku, value);
+  if (!obras.find(o => o.Codigo === STATE.liberaBasket[idx].obra)) {
+    STATE.liberaBasket[idx].obra = obras.length === 1 ? obras[0].Codigo : '';
+  }
+  renderLiberaBasket();
+}
+function onLrObraChange(idx, value) { STATE.liberaBasket[idx].obra = value; renderLiberaBasket(); }
+function onLrCantChange(idx, value) { STATE.liberaBasket[idx].cantidad = value; validarLiberaBasket(); }
+
+function renderLiberaBasket() {
+  const c = document.getElementById('lr-basket');
+  if (!c) return;
+  const prodElegibles = productosConReserva();
+
+  c.innerHTML = STATE.liberaBasket.map((line, idx) => {
+    const prod = STATE.productos.find(p => p.SKU === line.sku);
+    const zonas = line.sku ? zonasConReserva(line.sku) : [];
+    const obras = (line.sku && line.zona) ? obrasConReserva(line.sku, line.zona) : [];
+
+    const prodOpts = prodElegibles.map(p =>
+      `<option value="${attrEsc(p.SKU)}" ${line.sku === p.SKU ? 'selected' : ''}>${attrEsc(p.SKU)} — ${attrEsc(p.Nombre)}</option>`
+    ).join('');
+
+    const zonaOpts = zonas.map(z => {
+      // cantidad total reservada en esa zona para el SKU (sumando obras)
+      const vig = (STATE.reservasDetalle || [])
+        .filter(r => r.SKU === line.sku && r.Zona === z.Codigo)
+        .reduce((a, r) => a + Number(r.Cantidad || 0), 0);
+      return `<option value="${attrEsc(z.Codigo)}" ${line.zona === z.Codigo ? 'selected' : ''}>${attrEsc(z.Nombre)} (res: ${vig})</option>`;
+    }).join('');
+
+    const obraOpts = obras.map(o => {
+      const vig = reservaVigente(line.sku, line.zona, o.Codigo);
+      return `<option value="${attrEsc(o.Codigo)}" ${line.obra === o.Codigo ? 'selected' : ''}>${attrEsc(o.Codigo)} — ${attrEsc(o.Nombre)} (res: ${vig})</option>`;
+    }).join('');
+
+    const vigLinea = (line.sku && line.zona && line.obra) ? reservaVigente(line.sku, line.zona, line.obra) : 0;
+    const cantNum = parseFloat(line.cantidad || '0');
+    const excede = cantNum > 0 && cantNum > vigLinea;
+
+    return `
+      <div class="basket-line">
+        <button class="del-x" onclick="lrQuitarLinea(${idx})" title="Quitar">✕</button>
+        <div class="head">Reserva ${idx + 1}</div>
+        <div class="field">
+          <select onchange="onLrSkuChange(${idx}, this.value)">
+            <option value="">-- elegir producto con reserva --</option>
+            ${prodElegibles.length === 0 ? '<option disabled>No hay productos con reservas vigentes</option>' : ''}
+            ${prodOpts}
+          </select>
+        </div>
+        ${line.sku ? `
+          <div class="field-row">
+            <div class="field">
+              <label>Galpón</label>
+              <select onchange="onLrZonaChange(${idx}, this.value)">
+                <option value="">-- elegir --</option>
+                ${zonaOpts || '<option disabled>Sin reservas en ningún galpón</option>'}
+              </select>
+            </div>
+            <div class="field">
+              <label>Obra</label>
+              <select onchange="onLrObraChange(${idx}, this.value)" ${line.zona ? '' : 'disabled'}>
+                <option value="">${line.zona ? '-- elegir --' : 'primero elegí galpón'}</option>
+                ${obraOpts}
+              </select>
+            </div>
+          </div>
+          ${line.obra ? `
+            <div class="field">
+              <label>Cantidad${prod ? ' (' + attrEsc(prod.Unidad || '') + ')' : ''} — vigente: ${vigLinea}</label>
+              <input type="number" step="0.01" inputmode="decimal" value="${attrEsc(line.cantidad)}" oninput="onLrCantChange(${idx}, this.value)" placeholder="Ej: ${vigLinea} para liberar todo">
+            </div>
+            ${excede ? `<div class="alert alert-err" style="margin:4px 0 0;">⚠ Excede la reserva vigente (${vigLinea})</div>` : ''}
+          ` : ''}
+        ` : ''}
+      </div>`;
+  }).join('');
+
+  validarLiberaBasket();
+}
+
+function validarLiberaBasket() {
+  const btn = document.getElementById('lr-btn');
+  const sum = document.getElementById('lr-summary');
+  if (!btn) return;
+  let anyLineOk = false, anyBad = false;
+  const acc = {};
+  for (const l of STATE.liberaBasket) {
+    const cant = parseFloat(l.cantidad || '0');
+    if (!l.sku || !l.zona || !l.obra || !(cant > 0)) continue;
+    const key = l.sku + '||' + l.zona + '||' + l.obra;
+    acc[key] = (acc[key] || 0) + cant;
+    anyLineOk = true;
+  }
+  for (const key of Object.keys(acc)) {
+    const [sku, zona, obra] = key.split('||');
+    if (acc[key] > reservaVigente(sku, zona, obra)) anyBad = true;
+  }
+  btn.disabled = !anyLineOk || anyBad;
+  if (sum) {
+    const n = Object.keys(acc).length;
+    sum.textContent = n ? `${n} ${n === 1 ? 'reserva lista' : 'reservas listas'} para liberar` : '';
+  }
+}
+
+async function submitLiberaMasiva() {
+  const notas = document.getElementById('lr-notas').value;
+
+  const lineas = STATE.liberaBasket.filter(l => {
+    const c = parseFloat(l.cantidad || '0');
+    return l.sku && l.zona && l.obra && c > 0;
+  });
+  if (lineas.length === 0) { document.getElementById('mov-msg').innerHTML = '<div class="alert alert-err">Cargá al menos una reserva</div>'; return; }
+
+  document.getElementById('mov-msg').innerHTML = `<div class="alert alert-info">Liberando ${lineas.length} reservas...</div>`;
+
+  let okCount = 0, errs = [];
+  for (const l of lineas) {
+    try {
+      await api('addMovimiento', {
+        tipo: 'Libera_Reserva', sku: l.sku, cantidad: parseFloat(l.cantidad),
+        zonaOrigen: l.zona, obra: l.obra,
+        usuario: SESSION ? SESSION.user : '',
+        notas,
+      });
+      okCount++;
+    } catch (err) {
+      errs.push(`${l.sku}: ${err.message}`);
+    }
+  }
+  if (errs.length === 0) {
+    document.getElementById('mov-msg').innerHTML = `<div class="alert alert-ok">${okCount} reservas liberadas ✓</div>`;
+    setTimeout(() => { closeModal(); init(); }, 700);
+  } else {
+    document.getElementById('mov-msg').innerHTML =
+      `<div class="alert alert-ok">${okCount} OK</div>` +
+      `<div class="alert alert-err">${errs.length} con error:<br>${errs.map(attrEsc).join('<br>')}</div>`;
+    init();
+  }
+}
+
+// ============== PRODUCTOS ==============
+function renderProductos() {
+  const list = document.getElementById('productos-list');
+  if (!list) return;
+  const search = (document.getElementById('prod-search').value || '').toLowerCase();
+  let rows = STATE.productos;
+  if (search) rows = rows.filter(p =>
+    (p.Nombre || '').toString().toLowerCase().includes(search) ||
+    (p.SKU || '').toString().toLowerCase().includes(search));
+  if (rows.length === 0) { list.innerHTML = '<div class="empty">Sin productos</div>'; return; }
+  list.innerHTML = rows.map(p => {
+    const stockR = getStockRow(p.SKU) || {};
+    const foto = p.Foto_URL || NO_FOTO;
+    const packTag = p.Unidad_Pack && p.Cantidad_Por_Pack
+      ? `<span class="chip">1 ${attrEsc(p.Unidad_Pack)} = ${p.Cantidad_Por_Pack} ${attrEsc(p.Unidad || '')}</span>`
+      : '';
+    return `
+      <div class="card" style="padding:10px;" onclick='showDetalle(${jsStr(p.SKU)})'>
+        <img src="${attrEsc(foto)}" style="width:48px;height:48px;" onerror="this.src=window.NO_FOTO">
+        <div class="info">
+          <div class="title" style="font-size:14px;">${attrEsc(p.Nombre)}</div>
+          <div class="sub">${attrEsc(p.SKU)} · ${attrEsc(p.Categoria || '')}${p.Subcategoria ? ' › ' + attrEsc(p.Subcategoria) : ''}</div>
+          ${packTag ? `<div class="chips">${packTag}</div>` : ''}
+        </div>
+        <div class="totals"><div class="total-big" style="font-size:16px;">${Number(stockR.Disponible || 0)}</div><div class="unit">${attrEsc(p.Unidad || '')}</div></div>
+      </div>`;
+  }).join('');
+}
+
+function openNuevoProducto() {
+  const cats = [...new Set(STATE.categorias.map(c => c.Categoria))];
+  const catOptions = cats.map(c => `<option value="${attrEsc(c)}">${attrEsc(c)}</option>`).join('');
+  openModal(`
+    <h2>+ Nuevo Producto</h2>
+    <div id="prod-msg"></div>
+    <div class="field">
+      <label>Nombre *</label>
+      <input id="p-nom" placeholder="ej: Porcelanato símil madera 20x120">
+    </div>
+    <div class="field">
+      <label>Categoría *</label>
+      <select id="p-cat" onchange="updateSubcategorias()"><option value="">-- elegir --</option>${catOptions}<option value="__NEW__">+ Nueva categoría...</option></select>
+      <input id="p-cat-new" placeholder="Ej: Construcción" style="display:none;margin-top:6px;">
+    </div>
+    <div class="field">
+      <label>Subcategoría</label>
+      <select id="p-subcat" onchange="onSubcatChange()"><option value="">-- elegir --</option></select>
+      <input id="p-subcat-new" placeholder="Ej: Cemento" style="display:none;margin-top:6px;">
+    </div>
+    <div class="field">
+      <label>Unidad de stock</label>
+      <select id="p-unidad">
+        <option value="u.">u.</option><option value="m²">m²</option><option value="kg">kg</option>
+        <option value="lt">lt</option><option value="ml">ml</option><option value="cajas">cajas</option>
+        <option value="paquetes">paquetes</option>
+      </select>
+      <div class="hint">En qué unidad medís el stock (m², unidades, kg...).</div>
+    </div>
+    <div class="toggle-row">
+      <input type="checkbox" id="p-use-pack" onchange="togglePackCampos()">
+      <label for="p-use-pack">Viene por pack / pallet / caja</label>
+    </div>
+    <div id="pack-fields" style="display:none;">
+      <div class="field-row">
+        <div class="field">
+          <label>Unidad pack</label>
+          <select id="p-upack">
+            <option value="pallet">pallet</option>
+            <option value="caja">caja</option>
+            <option value="rollo">rollo</option>
+            <option value="bulto">bulto</option>
+            <option value="bolsa">bolsa</option>
+            <option value="pack">pack</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Cantidad por pack</label>
+          <input id="p-cpack" type="number" step="0.01" placeholder="ej: 60">
+        </div>
+      </div>
+      <div class="hint-strong">Ej: si <strong>1 pallet</strong> trae <strong>60 m²</strong>, cargás <code>60</code> y al hacer ingreso tocás "Cargar por pallet" y ponés 1.</div>
+    </div>
+    <div class="field">
+      <label>SKU (opcional — se genera automático si lo dejás vacío)</label>
+      <input id="p-sku" placeholder="se generará como CAT-SUB-001">
+      <div class="hint">3 letras de categoría + 3 de subcategoría + correlativo.</div>
+    </div>
+    <div class="field">
+      <label>Stock mínimo (para alerta)</label>
+      <input id="p-min" type="number" step="0.01" value="0">
+    </div>
+    <div class="field">
+      <label>Notas</label>
+      <textarea id="p-notas" placeholder="ej: Tamaño 60x120, espesor 9mm"></textarea>
+    </div>
+    <div style="border-top:1px dashed var(--border);margin:14px 0 10px;padding-top:10px;">
+      <div style="font-weight:700;color:var(--primary);margin-bottom:6px;">📦 Stock inicial (opcional)</div>
+      <div class="hint" style="margin-bottom:6px;">Si ya tenés este producto en el galpón, cargalo acá y queda registrado como ingreso. Si no, dejalo en 0.</div>
+      <div class="field-row">
+        <div class="field">
+          <label>Cantidad</label>
+          <input id="p-stock" type="number" step="0.01" value="0">
+        </div>
+        <div class="field">
+          <label>Depósito</label>
+          <select id="p-stock-zona">
+            <option value="">-- elegir --</option>
+            ${STATE.zonas.map(z => `<option value="${attrEsc(z.Codigo)}">${attrEsc(z.Nombre)}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="submitProducto()">Guardar</button>
+    </div>
+  `);
+}
+
+function togglePackCampos() {
+  const on = document.getElementById('p-use-pack').checked;
+  document.getElementById('pack-fields').style.display = on ? '' : 'none';
+}
+
+function updateSubcategorias() {
+  const catSel = document.getElementById('p-cat');
+  const catNewInput = document.getElementById('p-cat-new');
+  if (catSel.value === '__NEW__') {
+    catNewInput.style.display = '';
+    const sub = document.getElementById('p-subcat');
+    const subNew = document.getElementById('p-subcat-new');
+    sub.innerHTML = '<option value="__NEW__" selected>+ Nueva subcategoría...</option>';
+    subNew.style.display = '';
+    return;
+  } else {
+    catNewInput.style.display = 'none';
+    catNewInput.value = '';
+  }
+  const cat = catSel.value;
+  const subs = STATE.categorias.filter(c => c.Categoria === cat && c.Subcategoria).map(c => c.Subcategoria);
+  const sel = document.getElementById('p-subcat');
+  sel.innerHTML = '<option value="">-- elegir --</option>' +
+    subs.map(s => `<option value="${attrEsc(s)}">${attrEsc(s)}</option>`).join('') +
+    '<option value="__NEW__">+ Nueva subcategoría...</option>';
+  document.getElementById('p-subcat-new').style.display = 'none';
+  document.getElementById('p-subcat-new').value = '';
+}
+
+function onSubcatChange() {
+  const v = document.getElementById('p-subcat').value;
+  const inp = document.getElementById('p-subcat-new');
+  inp.style.display = v === '__NEW__' ? '' : 'none';
+  if (v !== '__NEW__') inp.value = '';
+}
+
+async function submitProducto() {
+  try {
+    const usePack = document.getElementById('p-use-pack').checked;
+    // Resolver cat/subcat (con soporte inline "Nueva")
+    let categoria = document.getElementById('p-cat').value;
+    if (categoria === '__NEW__') categoria = (document.getElementById('p-cat-new').value || '').trim();
+    let subcategoria = document.getElementById('p-subcat').value;
+    if (subcategoria === '__NEW__') subcategoria = (document.getElementById('p-subcat-new').value || '').trim();
+    if (!categoria) throw new Error('Falta categoría');
+
+    const payload = {
+      sku: document.getElementById('p-sku').value.trim(),
+      nombre: document.getElementById('p-nom').value.trim(),
+      categoria, subcategoria,
+      unidad: document.getElementById('p-unidad').value,
+      stockMinimo: document.getElementById('p-min').value,
+      notas: document.getElementById('p-notas').value,
+      unidadPack: usePack ? document.getElementById('p-upack').value : '',
+      cantidadPack: usePack ? document.getElementById('p-cpack').value : '',
+    };
+    const res = await api('addProducto', payload);
+    const sku = res.sku;
+
+    // Stock inicial: si se cargó cantidad+zona, hacer el ingreso automáticamente
+    const stockIni = parseFloat(document.getElementById('p-stock').value || '0');
+    const zonaIni  = document.getElementById('p-stock-zona').value;
+    let msg = `Producto creado ✓ SKU: <strong>${attrEsc(sku)}</strong>`;
+    if (stockIni > 0 && zonaIni) {
+      await api('addMovimiento', {
+        tipo: 'Ingreso', sku, cantidad: stockIni, zonaDestino: zonaIni,
+        usuario: SESSION ? SESSION.user : '', notas: 'Stock inicial (alta de producto)',
+      });
+      msg += `<br>+ ingreso inicial de <strong>${stockIni}</strong> en <strong>${attrEsc(zonaIni)}</strong> ✓`;
+    } else if (stockIni > 0 && !zonaIni) {
+      msg += '<br><span style="color:var(--warn)">Se cargó cantidad pero no depósito — no se registró ingreso inicial.</span>';
+    }
+    document.getElementById('prod-msg').innerHTML = `<div class="alert alert-ok">${msg}</div>`;
+    await init();
+    setTimeout(() => closeModal(), 1200);
+  } catch (err) {
+    document.getElementById('prod-msg').innerHTML = `<div class="alert alert-err">${attrEsc(err.message)}</div>`;
+  }
+}
+
+// ============== SUBIR FOTO ==============
+function openSubirFoto(sku) {
+  const prod = STATE.productos.find(p => p.SKU === sku);
+  if (!prod) return;
+  const nombreSafe = (prod.Nombre || '').substring(0,30).replace(/\s+/g,'_');
+  const tieneFoto = !!prod.Foto_URL;
+  openModal(`
+    <h2>📷 ${tieneFoto ? 'Cambiar foto' : 'Foto'} de ${attrEsc(prod.Nombre)}</h2>
+    <div id="foto-msg"></div>
+    ${tieneFoto ? `
+      <div class="hint" style="margin-bottom:6px;">Foto actual:</div>
+      <img src="${attrEsc(prod.Foto_URL)}" class="foto-preview" id="foto-actual" onerror="this.src=window.NO_FOTO">
+    ` : ''}
+    <div class="hint" style="margin-top:10px;margin-bottom:6px;">Previsualización de la nueva foto:</div>
+    <img id="foto-preview-nueva" class="foto-preview" src="${window.NO_FOTO}" style="opacity:.55;">
+    <div class="field" style="margin-top:10px;">
+      <label>Elegí cómo querés cargar la foto</label>
+      <div class="btn-row">
+        <button type="button" class="btn btn-secondary" onclick="document.getElementById('f-foto-galeria').click()">🖼 Desde galería</button>
+        <button type="button" class="btn btn-accent" onclick="document.getElementById('f-foto-camara').click()">📸 Sacar foto</button>
+      </div>
+      <input type="file" id="f-foto-galeria" accept="image/*" style="display:none;" onchange="previewFotoNueva(this)">
+      <!-- Sin 'accept' explícito para que el navegador NO muestre el picker
+           "Galería o Cámara" en iOS — con sólo capture="environment" abre la
+           cámara trasera directo. En Android Chrome también abre la cámara. -->
+      <input type="file" id="f-foto-camara" capture="environment" style="display:none;" onchange="previewFotoNueva(this)">
+    </div>
+    <div class="hint">Se guarda en Drive / Fotos / ${attrEsc(prod.Categoria || 'Varios')} / ${attrEsc(sku)}_${attrEsc(nombreSafe)}.jpg</div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" id="btn-subir-foto" onclick='submitFoto(${jsStr(sku)})' disabled>Subir</button>
+    </div>
+  `);
+}
+
+function previewFotoNueva(input) {
+  if (!input.files || input.files.length === 0) return;
+  const file = input.files[0];
+  // Limpio el otro input para no tener 2 archivos a la vez
+  const otroId = input.id === 'f-foto-galeria' ? 'f-foto-camara' : 'f-foto-galeria';
+  const otro = document.getElementById(otroId);
+  if (otro) otro.value = '';
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const img = document.getElementById('foto-preview-nueva');
+    if (img) { img.src = e.target.result; img.style.opacity = '1'; }
+  };
+  reader.readAsDataURL(file);
+  const btn = document.getElementById('btn-subir-foto');
+  if (btn) btn.disabled = false;
+}
+
+async function submitFoto(sku) {
+  try {
+    const prod = STATE.productos.find(p => p.SKU === sku);
+    const galeria = document.getElementById('f-foto-galeria');
+    const camara = document.getElementById('f-foto-camara');
+    let file = null;
+    if (galeria && galeria.files && galeria.files.length > 0) file = galeria.files[0];
+    else if (camara && camara.files && camara.files.length > 0) file = camara.files[0];
+    if (!file) throw new Error('Elegí una foto desde la galería o sacá una con la cámara');
+    document.getElementById('foto-msg').innerHTML = '<div class="alert alert-info">Subiendo... puede tardar unos segundos.</div>';
+    const base64 = await fileToBase64(file);
+    await apiPostJSON('uploadFoto', {
+      sku, nombre: prod.Nombre, categoria: prod.Categoria || 'Varios',
+      base64, mimeType: file.type || 'image/jpeg',
+    });
+    document.getElementById('foto-msg').innerHTML = `<div class="alert alert-ok">Foto guardada ✓</div>`;
+    await init();
+    setTimeout(() => closeModal(), 800);
+  } catch (err) {
+    document.getElementById('foto-msg').innerHTML = `<div class="alert alert-err">${attrEsc(err.message)}</div>`;
+  }
+}
+
+function fileToBase64(file) {
+  return new Promise((res, rej) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const s = reader.result;
+      const idx = s.indexOf('base64,');
+      res(idx >= 0 ? s.substring(idx + 7) : s);
+    };
+    reader.onerror = rej;
+    reader.readAsDataURL(file);
+  });
+}
+
+// ============== QR ==============
+// Genero el PNG del QR acá en el navegador (api.qrserver.com), lo convierto
+// a base64 y se lo mando al backend. Así el Apps Script no necesita el
+// permiso de UrlFetchApp (scope external_request).
+async function generarQRProducto(sku) {
+  const prod = STATE.productos.find(p => p.SKU === sku);
+  if (!prod) return;
+  const container = document.getElementById('qr-container');
+  container.innerHTML = '<div class="alert alert-info">Generando QR...</div>';
+  try {
+    // 1) Armo el destino del QR (la URL pública del Apps Script con el SKU).
+    //    Como desde el HTML no conocemos la URL del /exec, mando un flag y
+    //    el backend arma el qrData por su cuenta; mientras tanto uso un
+    //    placeholder con el SKU para pintar un QR de previsualización.
+    //    Para que el QR *apunte* al infoProducto real, piso los datos con
+    //    una segunda llamada. Simpler: uso la API_URL (es la del /exec).
+    const qrDestino = `${API_URL}?action=infoProducto&sku=${encodeURIComponent(sku)}`;
+    const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(qrDestino)}&size=400x400&margin=20&format=png`;
+
+    // 2) Bajo el PNG con fetch → blob → base64 (sin el prefijo data:...;base64,)
+    const resp = await fetch(qrApiUrl);
+    if (!resp.ok) throw new Error('No se pudo generar el QR (api.qrserver.com)');
+    const blob = await resp.blob();
+    const base64 = await blobToBase64(blob);
+
+    // 3) Mando el base64 al backend para que lo guarde en Drive y en la
+    //    columna QR_URL del producto.
+    const res = await apiPostJSON('generarQR', {
+      sku, nombre: prod.Nombre, categoria: prod.Categoria || 'Varios',
+      base64,
+    });
+    container.innerHTML = `
+      <div class="alert alert-ok">QR generado y guardado en Drive ✓</div>
+      <img src="${attrEsc(res.url)}" class="qr-preview" alt="QR ${attrEsc(sku)}">
+      <div class="hint" style="text-align:center;">Escaneá este QR desde cualquier celu para ver info + stock en tiempo real.</div>
+      <div class="btn-row">
+        <a class="btn btn-primary" href="${attrEsc(res.url)}" target="_blank" style="text-align:center;text-decoration:none;line-height:1;padding:14px 10px;">Ver en Drive</a>
+        <a class="btn btn-secondary" href="${attrEsc(res.qrData)}" target="_blank" style="text-align:center;text-decoration:none;line-height:1;padding:14px 10px;">Probar link</a>
+      </div>`;
+    // Recargo productos para que el prod.QR_URL quede en STATE y se oculte el botón.
+    await init();
+  } catch (err) {
+    container.innerHTML = `<div class="alert alert-err">${attrEsc(err.message)}</div>`;
+  }
+}
+
+function blobToBase64(blob) {
+  return new Promise((res, rej) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const s = reader.result;
+      const idx = s.indexOf('base64,');
+      res(idx >= 0 ? s.substring(idx + 7) : s);
+    };
+    reader.onerror = rej;
+    reader.readAsDataURL(blob);
+  });
+}
+
+// ============== ZONAS ==============
+function renderZonasView() {
+  const list = document.getElementById('zonas-list');
+  if (!list) return;
+  if (!STATE.zonas.length) { list.innerHTML = '<div class="empty">Sin zonas</div>'; return; }
+  list.innerHTML = STATE.zonas.map(z => {
+    const ubic = z.Ubicacion || '';
+    // Contar productos con stock en esta zona
+    const nProds = (STATE.stock || []).filter(r => r.SKU && Number(r[z.Codigo] || 0) > 0).length;
+    return `
+      <div class="list-item" onclick='showZonaDetalle(${jsStr(z.Codigo)})' style="cursor:pointer;">
+        <div class="info">
+          <strong>${attrEsc(z.Nombre)}</strong>
+          <small>${attrEsc(z.Codigo)}${z.Descripcion ? ' · ' + attrEsc(z.Descripcion) : ''} · ${nProds} productos</small>
+        </div>
+        <div class="actions" onclick="event.stopPropagation();">
+          ${ubic ? `<a href="${attrEsc(ubic)}" target="_blank">📍 Ubicación</a>` : '<small style="color:var(--muted)">Sin ubic.</small>'}
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function showZonaDetalle(codigo) {
+  const z = STATE.zonas.find(x => x.Codigo === codigo);
+  if (!z) return;
+  const rows = (STATE.stock || [])
+    .filter(r => r.SKU && Number(r[codigo] || 0) > 0)
+    .sort((a,b) => Number(b[codigo]||0) - Number(a[codigo]||0));
+  const totalProd = rows.length;
+  const bajos = rows.filter(r => r.Alerta === 'BAJO STOCK').length;
+  const lista = rows.length
+    ? rows.map(r => `
+        <div class="list-item" onclick='closeModal();setTimeout(()=>showDetalle(${jsStr(r.SKU)}),60)' style="cursor:pointer;">
+          <div class="info">
+            <strong>${attrEsc(r.Nombre || r.SKU)}</strong>
+            <small>${attrEsc(r.SKU)} · ${attrEsc(r.Categoria || '')}</small>
+          </div>
+          <div style="font-weight:700;color:var(--primary);">${r[codigo]} <small style="color:var(--muted);font-weight:400;">${attrEsc(r.Unidad||'')}</small></div>
+        </div>`).join('')
+    : '<div class="empty">Sin stock en este depósito.</div>';
+  openModal(`
+    <h2>${attrEsc(z.Nombre)}</h2>
+    <div class="sub" style="color:var(--muted);margin-bottom:8px;">${attrEsc(z.Codigo)}${z.Descripcion ? ' · ' + attrEsc(z.Descripcion) : ''}</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+      <span class="chip">📦 ${totalProd} productos</span>
+      ${bajos ? `<span class="chip" style="background:var(--warn);color:#fff;">⚠ ${bajos} bajo stock</span>` : ''}
+      ${z.Ubicacion ? `<a class="chip" href="${attrEsc(z.Ubicacion)}" target="_blank" style="background:var(--primary);color:#fff;text-decoration:none;">📍 Abrir ubicación</a>` : ''}
+    </div>
+    <div style="max-height:55vh;overflow-y:auto;">${lista}</div>
+    <div class="btn-row" style="margin-top:12px;">
+      <button class="btn btn-secondary" onclick="closeModal()">Cerrar</button>
+    </div>
+  `);
+}
+
+// ============== OBRAS ==============
+function renderObrasView() {
+  const list = document.getElementById('obras-list');
+  if (!list) return;
+  if (!STATE.obras.length) { list.innerHTML = '<div class="empty">Sin obras</div>'; return; }
+  const activas = STATE.obras.filter(o => o.Estado !== 'Finalizada');
+  const finalizadas = STATE.obras.filter(o => o.Estado === 'Finalizada');
+  const render = (arr, label) => arr.length ? `
+    <h4 style="color:var(--muted);margin:14px 0 8px;font-size:13px;text-transform:uppercase;">${label}</h4>
+    ${arr.map(o => {
+      const ubic = o.Ubicacion || '';
+      const aut  = o.Autorizante || '';
+      const res  = o.Responsable_Obra || o['Responsable Obra'] || o.Responsable || '';
+      const meta = [];
+      if (o.Direccion) meta.push(attrEsc(o.Direccion));
+      if (aut)         meta.push('Autoriza: ' + attrEsc(aut));
+      if (res)         meta.push('Resp: '     + attrEsc(res));
+      return `
+        <div class="list-item" onclick='showConsumoObra(${jsStr(o.Codigo)})'>
+          <div class="info">
+            <strong>${attrEsc(o.Nombre)}</strong>
+            <small>${attrEsc(o.Codigo)}${meta.length ? ' · ' + meta.join(' · ') : ''}</small>
+          </div>
+          <div class="actions" onclick="event.stopPropagation();">
+            ${ubic ? `<a href="${attrEsc(ubic)}" target="_blank">📍 Ubicación</a>` : ''}
+          </div>
+        </div>`;
+    }).join('')}` : '';
+  list.innerHTML = render(activas, 'Activas') + render(finalizadas, 'Finalizadas');
+}
+
+async function showConsumoObra(codigo) {
+  const obra = STATE.obras.find(o => o.Codigo === codigo);
+  openModal(`
+    <h2>${attrEsc(obra ? obra.Nombre : codigo)}</h2>
+    <div class="sub" style="color:var(--muted);margin-bottom:10px;">${attrEsc(codigo)}${obra && obra.Direccion ? ' · ' + attrEsc(obra.Direccion) : ''}</div>
+    <div id="obra-content"><div class="loader">Cargando movimientos...</div></div>
+    <div class="btn-row" style="margin-top:12px;">
+      <button class="btn btn-secondary" onclick="closeModal()">Cerrar</button>
+    </div>
+  `);
+  try {
+    const data = await api('getMovimientosObra', { obra: codigo });
+    let html = '';
+    if (data.reservas && data.reservas.length) {
+      html += `<h3 style="color:var(--purple);font-size:15px;margin:10px 0 6px;">📌 Reservas vigentes</h3>`;
+      html += data.reservas.map(r => `
+        <div class="list-item">
+          <div class="info"><strong>${attrEsc(r.nombre || r.sku)}</strong><small>${attrEsc(r.sku)}</small></div>
+          <div style="font-weight:600;color:var(--purple)">${r.cantidad} ${attrEsc(r.unidad || '')}</div>
+        </div>`).join('');
+    }
+    if (data.consumo && data.consumo.length) {
+      html += `<h3 style="color:var(--orange);font-size:15px;margin:14px 0 6px;">📦 Consumo (egresos acumulados)</h3>`;
+      html += data.consumo.map(c => `
+        <div class="list-item">
+          <div class="info"><strong>${attrEsc(c.nombre || c.sku)}</strong><small>${attrEsc(c.sku)}</small></div>
+          <div style="font-weight:600;color:var(--orange)">${c.cantidad} ${attrEsc(c.unidad || '')}</div>
+        </div>`).join('');
+    }
+    if (data.movimientos && data.movimientos.length) {
+      html += `<h3 style="color:var(--primary);font-size:15px;margin:14px 0 6px;">📋 Histórico (${data.movimientos.length})</h3>`;
+      html += `<div style="max-height:400px;overflow-y:auto;">`;
+      html += data.movimientos.map(m => {
+        const fecha = m.Fecha ? new Date(m.Fecha).toLocaleDateString('es-AR', {day:'2-digit',month:'2-digit',year:'2-digit'}) : '';
+        const prod = STATE.productos.find(p => p.SKU === m.SKU);
+        return `
+          <div class="mov-row">
+            <span class="tipo ${attrEsc(m.Tipo)}">${attrEsc(m.Tipo)}</span>
+            <div>
+              <div><strong>${attrEsc(prod ? prod.Nombre : m.SKU)}</strong></div>
+              <small style="color:var(--muted);">${fecha}${m.Usuario ? ' · ' + attrEsc(m.Usuario) : ''}${m.Notas ? ' · ' + attrEsc(m.Notas) : ''}</small>
+            </div>
+            <div style="text-align:right;font-weight:600;">${m.Cantidad}</div>
+          </div>`;
+      }).join('');
+      html += `</div>`;
+    }
+    if (!html) html = '<div class="empty">Sin movimientos para esta obra todavía.</div>';
+    document.getElementById('obra-content').innerHTML = html;
+  } catch (err) {
+    document.getElementById('obra-content').innerHTML = `<div class="alert alert-err">${attrEsc(err.message)}</div>`;
+  }
+}
+
+function openNuevaObra() {
+  openModal(`
+    <h2>+ Nueva obra</h2>
+    <div id="obra-msg"></div>
+    <div class="field"><label>Nombre *</label><input id="o-nom" placeholder="Ej: Obra Abril"></div>
+    <div class="field">
+      <label>Dirección</label>
+      <input id="o-dir" placeholder="Club de Campo Abril, Barrio Lote">
+      <div class="hint">Escribí la dirección como te referís a ella vos.</div>
+    </div>
+    <div class="field">
+      <label>Ubicación (link de Google Maps)</label>
+      <input id="o-ubi" placeholder="https://maps.google.com/...">
+      <div class="hint">Abrí la obra en Google Maps → Compartir → Copiar link.</div>
+    </div>
+    <div class="field">
+      <label>Autorizante *</label>
+      <input id="o-aut" placeholder="Quién autoriza ingresos a esta obra">
+      <div class="hint">Obligatorio — la persona que firma los ingresos de material.</div>
+    </div>
+    <div class="field">
+      <label>Responsable de obra</label>
+      <input id="o-res" placeholder="Capataz / contacto en la obra">
+      <div class="hint">A quién contactar in situ (opcional).</div>
+    </div>
+    <div class="field"><label>Notas</label><textarea id="o-notas"></textarea></div>
+    <div class="hint" style="margin:-4px 0 10px;">El código se genera automático (OBRA-001, OBRA-002, ...).</div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="submitObra()">Guardar</button>
+    </div>
+  `);
+}
+
+async function submitObra() {
+  try {
+    const res = await api('addObra', {
+      nombre:      document.getElementById('o-nom').value,
+      direccion:   document.getElementById('o-dir').value,
+      ubicacion:   document.getElementById('o-ubi').value,
+      autorizante: document.getElementById('o-aut').value,
+      responsable: document.getElementById('o-res').value,
+      notas:       document.getElementById('o-notas').value,
+    });
+    const cod = (res && res.codigo) ? res.codigo : '';
+    document.getElementById('obra-msg').innerHTML =
+      `<div class="alert alert-ok">Obra creada ✓ — código asignado: <strong>${attrEsc(cod)}</strong></div>`;
+    await init();
+    setTimeout(() => closeModal(), 900);
+  } catch (err) {
+    document.getElementById('obra-msg').innerHTML = `<div class="alert alert-err">${attrEsc(err.message)}</div>`;
+  }
+}
+
+// ============== NUEVO DEPÓSITO (ZONA) ==============
+function openNuevoDeposito() {
+  openModal(`
+    <h2>+ Nuevo depósito</h2>
+    <div id="zona-msg"></div>
+    <div class="field">
+      <label>Código *</label>
+      <input id="z-cod" placeholder="Ej: GAL-1000, TINGLADO" style="text-transform:uppercase;">
+      <div class="hint">Código corto. Va en mayúsculas.</div>
+    </div>
+    <div class="field"><label>Nombre *</label><input id="z-nom" placeholder="Ej: Galpón 1000"></div>
+    <div class="field"><label>Descripción</label><input id="z-desc" placeholder="Materiales que predominan, notas, etc."></div>
+    <div class="field">
+      <label>Ubicación (link de Google Maps)</label>
+      <input id="z-ubi" placeholder="https://maps.google.com/...">
+      <div class="hint">Abrí el depósito en Google Maps → Compartir → Copiar link.</div>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="submitZona()">Guardar</button>
+    </div>
+  `);
+}
+
+async function submitZona() {
+  try {
+    const res = await api('addZona', {
+      codigo:      document.getElementById('z-cod').value,
+      nombre:      document.getElementById('z-nom').value,
+      descripcion: document.getElementById('z-desc').value,
+      ubicacion:   document.getElementById('z-ubi').value,
+    });
+    const cod = (res && res.codigo) ? res.codigo : '';
+    document.getElementById('zona-msg').innerHTML =
+      `<div class="alert alert-ok">Depósito creado ✓ — ${attrEsc(cod)}</div>`;
+    await init();
+    setTimeout(() => closeModal(), 900);
+  } catch (err) {
+    document.getElementById('zona-msg').innerHTML = `<div class="alert alert-err">${attrEsc(err.message)}</div>`;
+  }
+}
+
+// ============== MAPAS (Leaflet + OpenStreetMap) ==============
+
+// Parsea un link de Google Maps y devuelve { lat, lng } o null.
+// Maneja los formatos comunes:
+//   - .../@-34.5,-58.4,15z  (formato principal cuando compartís un lugar)
+//   - ?q=-34.5,-58.4
+//   - !3d-34.5!4d-58.4  (formato embed)
+// Los links cortos (maps.app.goo.gl, goo.gl/maps) no se pueden resolver del lado del cliente.
+function parseLatLng(url) {
+  if (!url) return null;
+  const s = String(url);
+  let m = s.match(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
+  if (m) return { lat: parseFloat(m[1]), lng: parseFloat(m[2]) };
+  m = s.match(/[?&]q=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
+  if (m) return { lat: parseFloat(m[1]), lng: parseFloat(m[2]) };
+  m = s.match(/!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/);
+  if (m) return { lat: parseFloat(m[1]), lng: parseFloat(m[2]) };
+  return null;
+}
+
+// Estado interno de mapas (para poder destruirlos al cerrar modal)
+let _mapInstance = null;
+
+function _destroyMap() {
+  if (_mapInstance) { try { _mapInstance.remove(); } catch(e){} _mapInstance = null; }
+}
+
+function _renderMapModal(titulo, items, color) {
+  // items: [{ nombre, subtitulo, url, ubicacionUrl }]
+  const parsed = items.map(it => {
+    const ll = parseLatLng(it.ubicacionUrl);
+    return { ...it, ll };
+  });
+  const ok  = parsed.filter(p => p.ll);
+  const bad = parsed.filter(p => !p.ll);
+
+  openModal(`
+    <h2>${attrEsc(titulo)}</h2>
+    <div style="color:var(--muted);font-size:13px;margin-bottom:8px;">
+      ${ok.length} en el mapa${bad.length ? ` · ${bad.length} sin ubicación válida` : ''}
+    </div>
+    <div id="mapa" style="height:60vh;min-height:360px;border-radius:10px;overflow:hidden;border:1px solid var(--border);"></div>
+    ${bad.length ? `
+      <details style="margin-top:10px;">
+        <summary style="cursor:pointer;color:var(--muted);font-size:13px;">Sin ubicación (${bad.length})</summary>
+        <div style="font-size:12px;color:var(--muted);margin-top:6px;">
+          ${bad.map(b => `• ${attrEsc(b.nombre)}${b.ubicacionUrl ? ' (link corto, no se pudo parsear)' : ' (sin link)'}`).join('<br>')}
+        </div>
+        <div class="hint" style="margin-top:6px;">
+          Tip: si el link es de <code>maps.app.goo.gl</code> o <code>goo.gl/maps</code>, abrilo en el navegador, esperá que redirija, y copiá la URL larga que tiene las coordenadas.
+        </div>
+      </details>
+    ` : ''}
+    <div class="btn-row" style="margin-top:12px;">
+      <button class="btn btn-secondary" onclick="closeModal(); _destroyMap();">Cerrar</button>
+    </div>
+  `);
+
+  // Inicializar Leaflet después de que el div esté en el DOM
+  setTimeout(() => {
+    _destroyMap();
+    if (typeof L === 'undefined') {
+      document.getElementById('mapa').innerHTML =
+        '<div class="alert alert-err" style="margin:10px;">No se pudo cargar Leaflet. Revisá que tengas internet.</div>';
+      return;
+    }
+    const map = L.map('mapa');
+    _mapInstance = map;
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>'
+    }).addTo(map);
+
+    if (!ok.length) {
+      // Vista por defecto: Argentina
+      map.setView([-38.4, -63.6], 4);
+      return;
+    }
+
+    const markers = ok.map(p => {
+      const icon = L.divIcon({
+        html: `<div style="background:${color};color:#fff;width:28px;height:28px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.3);"><span style="transform:rotate(45deg);font-weight:700;font-size:11px;">${attrEsc((p.nombre||'').charAt(0).toUpperCase())}</span></div>`,
+        className: '',
+        iconSize: [28, 28],
+        iconAnchor: [14, 28],
+        popupAnchor: [0, -26],
+      });
+      const mk = L.marker([p.ll.lat, p.ll.lng], { icon }).addTo(map);
+      const popHtml =
+        `<div style="min-width:180px;">
+          <div style="font-weight:700;margin-bottom:4px;">${attrEsc(p.nombre)}</div>
+          ${p.subtitulo ? `<div style="font-size:12px;color:#555;margin-bottom:6px;">${attrEsc(p.subtitulo)}</div>` : ''}
+          <a href="${attrEsc(p.ubicacionUrl)}" target="_blank" style="font-size:12px;">Abrir en Google Maps ↗</a>
+        </div>`;
+      mk.bindPopup(popHtml);
+      return mk;
+    });
+
+    const group = L.featureGroup(markers);
+    map.fitBounds(group.getBounds().pad(0.2));
+    if (ok.length === 1) map.setZoom(15);
+  }, 80);
+}
+
+function openMapaObras() {
+  const items = (STATE.obras || [])
+    .filter(o => o.Estado !== 'Finalizada')
+    .map(o => ({
+      nombre: o.Nombre || o.Codigo,
+      subtitulo: [o.Codigo, o.Direccion, o.Autorizante ? 'Autoriza: ' + o.Autorizante : null].filter(Boolean).join(' · '),
+      ubicacionUrl: o.Ubicacion || '',
+    }));
+  _renderMapModal('📍 Obras en el mapa', items, '#C0392B');
+}
+
+function openMapaZonas() {
+  const items = (STATE.zonas || []).map(z => ({
+    nombre: z.Nombre || z.Codigo,
+    subtitulo: [z.Codigo, z.Descripcion].filter(Boolean).join(' · '),
+    ubicacionUrl: z.Ubicacion || '',
+  }));
+  _renderMapModal('📍 Depósitos en el mapa', items, '#1F4E78');
+}
+
+// ============== MODAL / NAV ==============
+function openModal(html) {
+  document.getElementById('modal').innerHTML = html;
+  document.getElementById('modal-bg').classList.add('open');
+}
+function closeModal() {
+  document.getElementById('modal-bg').classList.remove('open');
+  _destroyMap();
+}
+function showView(v) {
+  ['stock','productos','zonas','obras'].forEach(x => {
+    const el = document.getElementById('view-' + x);
+    if (el) el.style.display = (v === x) ? '' : 'none';
+  });
+  document.getElementById('fab').style.display = (v === 'stock') ? '' : 'none';
+  document.querySelectorAll('#nav-tabs button').forEach(b => {
+    b.classList.toggle('active', b.dataset.view === v);
+  });
+}
+
+// ============== BOOTSTRAP ==============
+window.addEventListener('load', async () => {
+  SESSION = loadSession();
+  if (SESSION) {
+    await enterApp();
+  } else {
+    bootLogin();
+  }
+});
+</script>
+
+</body>
+</html>
