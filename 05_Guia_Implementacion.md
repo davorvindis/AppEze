@@ -39,11 +39,16 @@ Esta guía te lleva de los archivos a tener la app funcionando en el celular. Ca
    ];
    ```
 4. Guardá (disquete). Nombre del proyecto: "Stock API".
-5. **Implementar → Nueva implementación → Aplicación web**:
-   - Ejecutar como: **Yo**
-   - Quién tiene acceso: **Cualquier persona**
-6. Autorizá permisos (va a pedir Drive y Sheets). Configuración avanzada → Ir a Stock API → Permitir.
-7. Copiá la URL que termina en `/exec`.
+5. **Agregar el manifiesto `appsscript.json` con scopes explícitos** (evita el error "No tienes permiso para llamar a DriveApp"):
+   - Engranaje de la izquierda → **"Configuración del proyecto"** → tildar **"Mostrar el archivo de manifiesto 'appsscript.json' en el editor"**.
+   - Volvé al editor, abrí `appsscript.json` y pegá el contenido del archivo `appsscript.json` de este repo (incluye los scopes `/auth/drive` y `/auth/spreadsheets`, y define `executeAs: USER_DEPLOYING`).
+6. **Forzar el diálogo de permisos**: en el selector de funciones elegí `ensureDriveRoot` → Ejecutar → aceptá **todos** los permisos que pida (Drive + Sheets + External request).
+7. **Implementar → Nueva implementación → Aplicación web**:
+   - Ejecutar como: **Yo** (no "Usuario que accede a la app" — sino el script corre sin tus permisos de Drive).
+   - Quién tiene acceso: **Cualquier persona**.
+8. Copiá la URL que termina en `/exec`.
+
+> Si ya tenías la app desplegada y te tira "No tienes permiso para llamar a DriveApp.getFolderById", hacé los pasos 5 y 6 sobre el proyecto existente y después **Implementar → Administrar implementaciones → editar → Versión nueva → Implementar**. La URL se mantiene.
 
 ## Paso 4 — Dar de alta a los usuarios del equipo (2 min)
 
