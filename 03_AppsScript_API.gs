@@ -150,16 +150,27 @@ function resolverCoordenadas(url) {
   var s = String(url).trim();
   if (!s) return null;
 
-  // Si es un link corto, seguir el redirect para obtener la URL larga
+  // Si es un link corto, seguir redirects hasta obtener la URL final
   if (s.indexOf('goo.gl') !== -1 || s.indexOf('maps.app') !== -1) {
     try {
-      var resp = UrlFetchApp.fetch(s, { followRedirects: false, muteHttpExceptions: true });
-      var loc = resp.getHeaders()['Location'] || resp.getHeaders()['location'] || '';
-      if (loc) s = loc;
+      // followRedirects:true deja que UrlFetchApp siga todos los redirects
+      var resp = UrlFetchApp.fetch(s, { followRedirects: true, muteHttpExceptions: true });
+      // La URL final queda en el contenido HTML — buscar coordenadas ahí
+      var body = resp.getContentText();
+      // Buscar en la URL final (a veces está en un meta refresh o en el body)
+      var finalUrl = resp.getUrl ? resp.getUrl() : '';
+      if (finalUrl) s = finalUrl;
+      // También buscar coordenadas en el HTML por si la URL no las tiene
+      var m = body.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
+      if (m) return { lat: parseFloat(m[1]), lng: parseFloat(m[2]) };
+      m = body.match(/center=(-?\d+\.\d+)(?:%2C|,)(-?\d+\.\d+)/);
+      if (m) return { lat: parseFloat(m[1]), lng: parseFloat(m[2]) };
+      m = body.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/);
+      if (m) return { lat: parseFloat(m[1]), lng: parseFloat(m[2]) };
     } catch (_) {}
   }
 
-  // Parsear coordenadas de la URL larga
+  // Parsear coordenadas de la URL directa
   var m = s.match(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
   if (m) return { lat: parseFloat(m[1]), lng: parseFloat(m[2]) };
   m = s.match(/[?&]q=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
