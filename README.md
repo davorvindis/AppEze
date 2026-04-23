@@ -1,4 +1,4 @@
-# Sistema de Stock Centralizado — Inventario Obras
+# Sistema de Stock Centralizado — Inventario Obras (v4)
 
 Sistema de inventario multi-depósito para materiales de construcción, con app web mobile-first, backend serverless sobre Google Apps Script, y Google Sheets como base de datos.
 
@@ -17,15 +17,19 @@ Antes: información dispersa en papel, WhatsApp y planillas sueltas. Objetivo: c
 | Base de datos | Google Sheets (7 hojas) | El "dueño" puede ver/editar datos directamente sin UI. Permite a usuarios no-técnicos del equipo operar sobre el Sheet si hace falta. |
 | Storage de imágenes | Google Drive (subcarpetas auto-creadas por categoría) | Integrado con el stack de Google; compartido como "cualquiera con el enlace → lector" para que la app web y los QR públicos muestren las fotos sin login. |
 | Códigos QR | Servicio público `api.qrserver.com` (fetch desde Apps Script) | Evita dependencias. Cada QR apunta a una URL `/exec?action=infoProducto&sku=XXX` del mismo Apps Script, que sirve HTML público con info + stock actualizado. |
-| Autenticación | Token API compartido (constante en Apps Script) | MVP. En el roadmap está migrar a Google Identity Services cuando se publique en servidor propio. |
+| Autenticación | Token API (constante en Apps Script) + login por usuario + PIN de 4 dígitos | Dos niveles: el token protege la API a nivel app; los usuarios se definen en un array `USUARIOS` en el Apps Script y cada uno tiene su PIN. El nombre del usuario que está logueado queda registrado en cada movimiento. |
 
 ## Arquitectura
 
 ```
 ┌────────────────────────────────────────┐
 │  HTML/JS app (04_App_Stock.html)       │  ← corre local o en servidor estático
+│  - URL y token HARDCODEADOS en el JS   │
+│  - Overlay de login: selector usuario  │
+│    + PIN pad (4 dígitos) con sesión    │
+│    persistida en sessionStorage        │
 │  - Pestañas: Stock / Productos /       │
-│    Zonas / Obras / Config              │
+│    Zonas / Obras                       │
 │  - Modales: Ingreso / Traslado /       │
 │    Egreso / Ajuste / Reserva /         │
 │    Nuevo Producto / Nueva Obra /       │
@@ -56,6 +60,8 @@ Todos reciben `action` y `token` (excepto `infoProducto` que es público):
 
 | Action | Método | Descripción |
 |--------|--------|-------------|
+| `getUsuarios` | GET | Lista de usuarios registrados (sólo `user` y `nombre`, nunca el PIN). Lo consume la pantalla de login. |
+| `login` | POST | Valida `user` + `pin` contra el array `USUARIOS` del Apps Script. Devuelve `{ user, nombre }` o error. |
 | `getProducts` | GET | Catálogo de productos activos |
 | `getZones` | GET | Zonas/galpones activos |
 | `getObras` | GET | Obras |
@@ -74,7 +80,9 @@ Todos reciben `action` y `token` (excepto `infoProducto` que es público):
 
 ### Modelo de datos (7 hojas del Sheet)
 
-1. **Productos**: `SKU | Nombre | Categoria | Subcategoria | Unidad | Foto_URL | Stock_Minimo_Total | Notas | Activo`
+1. **Productos**: `SKU | Nombre | Categoria | Subcategoria | Unidad | Foto_URL | Stock_Minimo_Total | Notas | Activo | Unidad_Pack | Cantidad_Por_Pack`
+   - `Unidad_Pack` (opcional): cómo viene el producto del proveedor (`pallet`, `caja`, `rollo`, `bulto`, `bolsa`, `pack`).
+   - `Cantidad_Por_Pack` (opcional): cuánto de la `Unidad` de stock representa 1 pack (ej: 1 pallet de porcelanato = 60 m² → `60`). La app usa este dato para el cálculo automático en ingresos.
 2. **Zonas**: `Codigo | Nombre | Descripcion | Activo | Ubicacion` (col E = link Maps)
 3. **Categorias**: `Categoria | Subcategoria` (lista maestra)
 4. **Obras**: `Codigo | Nombre | Direccion | Estado | Fecha_Inicio | Notas | Ubicacion` (col G = link Maps)
@@ -139,10 +147,11 @@ Stock Galpones/                         ← carpeta raíz (configurada por ID en
 
 1. Crear carpeta en Drive, copiar su ID.
 2. Subir `02_Plantilla_Stock.xlsx`, convertir a Google Sheet.
-3. Extensiones → Apps Script → pegar `03_AppsScript_API.gs`, editar `API_TOKEN` y `DRIVE_ROOT_FOLDER_ID`.
+3. Extensiones → Apps Script → pegar `03_AppsScript_API.gs`, editar `API_TOKEN`, `DRIVE_ROOT_FOLDER_ID` y el array `USUARIOS` (usuario + PIN + nombre de cada persona del equipo).
 4. Implementar como Web App, autorizar permisos (Sheets + Drive + UrlFetch), copiar URL `/exec`.
-5. Abrir `04_App_Stock.html`, pestaña Config, pegar URL y token.
-6. Cargar datos iniciales (zonas, obras, productos) y hacer los ajustes de "Inventario inicial".
+5. Editar `04_App_Stock.html` y pegar la URL del paso 4 y el token del paso 3 en las constantes `API_URL` y `API_TOKEN` del principio del `<script>`.
+6. Abrir el HTML → loguearse con usuario + PIN.
+7. Cargar datos iniciales (zonas, obras, productos) y hacer los ajustes de "Inventario inicial".
 
 ## Decisiones de diseño clave
 
@@ -150,26 +159,34 @@ Stock Galpones/                         ← carpeta raíz (configurada por ID en
 - **Anular = movimiento inverso**: nunca borrar filas de Movimientos. Si hay un error, cargar un movimiento opuesto (con nota explicativa).
 - **Reservas separadas del físico**: el campo "Disponible" = Físico − Reservado. Esto permite apartar material para una obra sin moverlo todavía.
 - **QR → URL pública del mismo backend**: el QR codifica `SCRIPT_URL?action=infoProducto&sku=XXX`, que sirve HTML standalone. No hace falta hostear nada extra — cualquiera puede escanear con el celu y ver info + stock live.
-- **Token único compartido en vez de login**: MVP. Aceptable para 2-5 usuarios conocidos. El camino a autenticación real está documentado en el roadmap.
-- **Sin frameworks en el frontend**: un solo archivo HTML de ~600 líneas. Facilita mantenimiento, despliegue y entendimiento para el dueño (no-dev) que quiere poder tocar cosas.
+- **Dos niveles de auth (token + PIN por usuario)**: el token API protege la API a nivel app (nadie de afuera puede pegarle). Los usuarios con PIN se definen en un array del Apps Script (`USUARIOS`) y sirven para identificar quién hizo cada movimiento en el log. Es deliberadamente simple — pensado para un equipo conocido de 2-8 personas, estilo "desbloqueo de teléfono". El nombre del usuario logueado queda en cada fila de Movimientos.
+- **URL y token hardcodeados en el HTML**: se eliminó la vista de "Configuración" que existía en v3. Ahora al abrir la app van directo al login. Simplifica el onboarding (el usuario no tiene que copiar URLs ni tokens) a cambio de tener que editar el HTML si cambia el deployment.
+- **Sin frameworks en el frontend**: un solo archivo HTML de ~1000 líneas. Facilita mantenimiento, despliegue y entendimiento para el dueño (no-dev) que quiere poder tocar cosas.
 - **CORS y Apps Script**: Apps Script tiene particularidades — `content-type: text/plain` evita preflight para requests GET simples; para uploads de base64 se usa POST con `application/json` y `e.postData.contents` se parsea manualmente.
 - **SKU auto con fallback**: si el usuario quiere pasar su propio SKU (ej. código del proveedor), lo respeta; si no, genera uno coherente con la taxonomía.
 
 ## Estado actual y próximos pasos
 
-**Implementado (v2):**
+**Implementado (v4):**
 - Todos los endpoints de arriba.
-- App con 5 vistas (Stock, Productos, Zonas, Obras, Config) + 10 modales.
-- Sube de fotos desde la app + sincronización desde Drive.
+- App con 4 vistas (Stock, Productos, Zonas, Obras) + 10+ modales.
+- Subida de fotos desde la app + sincronización desde Drive.
 - Generación de QR por producto.
 - Consumo por obra interactivo (histórico, totales, reservas vigentes).
 - Alertas de stock bajo.
 - Links a Google Maps para zonas y obras.
 - Reservas y liberación de reservas.
+- **Pack / pallet en productos** — cada producto puede definir una "Unidad_Pack" (pallet, caja, rollo, bulto, bolsa, pack) y cuánto de la unidad de stock representa un pack. Al hacer un Ingreso, un toggle "Cargar por pack" permite ingresar cantidad de packs y la app calcula el total en unidades de stock antes de guardar.
+- **Egreso masivo multi-producto** — un solo egreso puede tener varias líneas (producto × zona × cantidad) bajo la misma obra. Sólo se listan productos con stock >0; por línea se muestran las zonas con stock y la cantidad disponible. Validación en tiempo real: si la cantidad excede lo disponible el botón "Guardar todo" se bloquea.
+- **Login por usuario + PIN (v4)** — overlay de login al abrir la app con selector de usuario (avatar con iniciales) y PIN pad de 4 dígitos estilo "desbloqueo de celular". Los usuarios se definen en el array `USUARIOS` del Apps Script. Sesión persistida en `sessionStorage` (no hay que reloguearse al refrescar). El header muestra un chip con avatar del usuario logueado + botón de logout. Animación de shake en PIN incorrecto. Soporte de teclado físico (0-9 y Backspace) para PC.
+- **URL y token hardcodeados (v4)** — se eliminó la vista de Configuración. Las constantes `API_URL` y `API_TOKEN` van al principio del `<script>` del HTML.
+- **Fixes de v2→v3**:
+  - Atributos `onclick` y `onerror` ahora se construyen con helpers (`jsStr`, `attrEsc`) en vez de escapes manuales — los botones Reservar/Liberar/Foto/QR del detalle de producto ya funcionan correctamente.
+  - Imagen fallback extraída a una constante global `NO_FOTO` (data URL SVG pre-codificado) — desaparece el bug que mostraba el HTML del SVG como texto en las tarjetas cuando fallaba la carga.
 
 **Pendiente / roadmap:**
 1. **Publicación en servidor propio** — mover `04_App_Stock.html` a un hosting (Netlify / Vercel / VPS).
-2. **Autenticación real** — migrar del token compartido a Google Identity Services (login con Google) + permisos por rol (admin, operador, solo lectura).
+2. **Autenticación robusta** — migrar del esquema actual (token + PIN) a Google Identity Services (login con Google) + permisos por rol (admin, operador, solo lectura). El esquema actual alcanza para un equipo chico pero no escala a permisos diferenciados.
 3. **CORS restringido** — limitar el Apps Script a aceptar sólo requests desde el dominio propio.
 4. **Reportes** — dashboard de consumos mensuales por obra, productos más movidos, rotación, etc.
 5. **Remitos PDF** — generar PDF automático al hacer un egreso a obra.
