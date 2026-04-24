@@ -945,12 +945,18 @@ async function init() {
       api('getStock'),
       api('getReservasDetalle').catch(() => []),  // si el backend viejo no lo tiene, no rompe
     ]);
-    STATE.productos = productos;
-    STATE.zonas = zonas;
-    STATE.obras = obras;
-    STATE.categorias = categorias;
-    STATE.stock = stock;
-    STATE.reservasDetalle = reservasDetalle || [];
+    // Normalizo SKU/Codigo a String — el backend devuelve Number si son todos
+    // dígitos (ej: SKU de 13 dígitos tipo EAN), y las comparaciones con ===
+    // fallan silenciosamente. Tramitamos una sola vez acá.
+    const toStr = v => (v == null ? '' : String(v));
+    STATE.productos     = (productos || []).map(p => ({ ...p, SKU: toStr(p.SKU) }));
+    STATE.zonas         = (zonas || []).map(z => ({ ...z, Codigo: toStr(z.Codigo) }));
+    STATE.obras         = (obras || []).map(o => ({ ...o, Codigo: toStr(o.Codigo) }));
+    STATE.categorias    = categorias || [];
+    STATE.stock         = (stock || []).map(s => ({ ...s, SKU: toStr(s.SKU) }));
+    STATE.reservasDetalle = (reservasDetalle || []).map(r => ({
+      ...r, SKU: toStr(r.SKU), Zona: toStr(r.Zona), Obra: toStr(r.Obra),
+    }));
     renderZonas();
     renderCategorias();
     renderStock();
