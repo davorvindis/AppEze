@@ -1169,17 +1169,40 @@ function renderStock() {
 
 // ============== DETALLE PRODUCTO ==============
 function showDetalle(sku) {
-  const r = getStockRow(sku);
-  if (!r) return;
+  let r = getStockRow(sku);
   const prod = STATE.productos.find(p => p.SKU === sku) || {};
+  // Fallback: si no hay fila en Stock_Actual (producto nuevo sin movimientos, o
+  // stock desincronizado), sintetizo una con ceros para que el detalle se abra
+  // igual y el usuario pueda al menos ver info del producto y reservar/liberar.
+  let stockMissing = false;
+  if (!r) {
+    stockMissing = true;
+    console.warn('[showDetalle] Sin fila en STATE.stock para SKU', sku,
+                 '— STATE.stock.length =', (STATE.stock || []).length,
+                 '— abriendo detalle con ceros');
+    r = {
+      SKU: sku,
+      Nombre: prod.Nombre || sku,
+      Categoria: prod.Categoria || '',
+      Unidad: prod.Unidad || '',
+      Total_Fisico: 0,
+      Reservado: 0,
+      Disponible: 0,
+      Minimo: prod.Minimo || 0,
+    };
+  }
   const zonasRows = STATE.zonas.map(z =>
     `<div class="row"><span>${attrEsc(z.Nombre)}</span><strong>${r[z.Codigo] || 0}</strong></div>`).join('');
   const packInfo = prod.Unidad_Pack && prod.Cantidad_Por_Pack
     ? `<div class="hint-strong">📦 1 ${attrEsc(prod.Unidad_Pack)} = ${prod.Cantidad_Por_Pack} ${attrEsc(prod.Unidad || '')}</div>`
     : '';
+  const stockWarnBlock = stockMissing
+    ? `<div class="alert alert-err" style="margin-bottom:8px;">⚠ No se encontró fila de stock para este SKU. Puede ser que el producto esté recién creado o que el Stock_Actual esté desincronizado. Mostrando ceros.</div>`
+    : '';
   openModal(`
     <h2>${attrEsc(r.Nombre || prod.Nombre || sku)}</h2>
     <div class="sub" style="color:var(--muted);margin-bottom:10px;">${attrEsc(r.SKU)} · ${attrEsc(r.Categoria || '')}</div>
+    ${stockWarnBlock}
     ${prod.Foto_URL ? `<img src="${attrEsc(prod.Foto_URL)}" class="foto-preview" onerror="this.src=window.NO_FOTO">` : ''}
     ${packInfo}
     <div class="detail-rows">
