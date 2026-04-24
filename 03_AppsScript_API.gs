@@ -748,15 +748,22 @@ function servirInfoProductoHTML(sku) {
 
   if (!p) {
     return HtmlService.createHtmlOutput(
-      `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>` +
-      `<body style="font-family:-apple-system,sans-serif;padding:40px;text-align:center;">` +
-      `<h1 style="color:#C0392B">Producto no encontrado</h1><p>SKU: ${sku}</p></body></html>`);
+      `<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">` +
+      `<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">` +
+      `<title>Sin producto</title></head>` +
+      `<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;` +
+      `margin:0;padding:32px 20px;text-align:center;background:#F4F6F9;color:#222;font-size:17px;">` +
+      `<div style="font-size:56px;margin-bottom:8px;">❓</div>` +
+      `<h1 style="color:#C0392B;font-size:26px;margin:0 0 12px;">Producto no encontrado</h1>` +
+      `<p style="color:#6B7280;font-size:16px;">SKU: <code style="font-size:17px;">${sku}</code></p></body></html>`)
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
   }
 
   const zonas = getZones();
   const zonasRows = zonas.map(z => {
     const v = stock ? Number(stock[z.Codigo] || 0) : 0;
-    return `<tr><td>${z.Nombre}</td><td style="text-align:right;font-weight:600">${v}</td></tr>`;
+    const empty = v === 0 ? ' style="color:#9CA3AF"' : '';
+    return `<tr${empty}><td>${z.Nombre}</td><td class="num">${v}</td></tr>`;
   }).join('');
 
   const total     = stock ? Number(stock.Total_Fisico || 0) : 0;
@@ -765,50 +772,125 @@ function servirInfoProductoHTML(sku) {
   const minimo    = stock ? Number(stock.Minimo || 0) : 0;
   const alerta    = stock && stock.Alerta === 'BAJO STOCK';
   const foto      = p.Foto_URL || '';
+  const unidad    = p.Unidad || '';
+
+  // Chip de sub/categoria
+  const chipText = (p.Subcategoria || p.Categoria || '').trim();
 
   const html = `<!DOCTYPE html>
 <html lang="es"><head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#143757">
 <title>${p.Nombre} · ${p.SKU}</title>
 <style>
-  body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; margin:0; padding:0; background:#F4F6F9; color:#222; }
-  header { background:#1F4E78; color:#fff; padding:16px; text-align:center; }
-  .wrap { max-width:500px; margin:0 auto; padding:16px; }
-  .card { background:#fff; border-radius:12px; padding:16px; margin-bottom:12px; box-shadow:0 2px 6px rgba(0,0,0,.06); }
-  h1 { margin:0 0 6px; font-size:20px; }
-  .sub { color:#6B7280; font-size:13px; }
-  img { width:100%; max-height:280px; object-fit:cover; border-radius:10px; display:block; margin-top:10px; }
-  table { width:100%; border-collapse:collapse; margin-top:10px; font-size:15px; }
-  td { padding:10px 6px; border-bottom:1px solid #E3E7ED; }
-  .big { font-size:36px; font-weight:700; color:#1F4E78; text-align:center; margin:10px 0 0; }
-  .mid { text-align:center; color:#6B7280; font-size:13px; }
-  .warn { background:#FDE8E6; color:#9C0006; padding:8px 12px; border-radius:8px; font-weight:600; text-align:center; margin-top:10px; }
-  .ok   { background:#D5F5E3; color:#1E8449; padding:8px 12px; border-radius:8px; font-weight:600; text-align:center; margin-top:10px; }
+  /* Mobile-first: todo dimensionado para que se lea sin zoom en un celu.
+     Base font 17px (estandar iOS para evitar que Safari haga auto-zoom en inputs). */
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html, body { margin:0; padding:0; }
+  body {
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    background:#F4F6F9; color:#1F2937;
+    font-size:17px; line-height:1.45;
+    padding-bottom:env(safe-area-inset-bottom);
+  }
+  header {
+    background:#143757; color:#fff;
+    padding:18px 20px calc(18px + env(safe-area-inset-top)) 20px;
+    padding-top:calc(18px + env(safe-area-inset-top));
+    text-align:center; font-size:17px; font-weight:600; letter-spacing:.02em;
+  }
+  .wrap { max-width:560px; margin:0 auto; padding:14px; }
+  .card {
+    background:#fff; border-radius:14px; padding:18px;
+    margin-bottom:12px; box-shadow:0 2px 8px rgba(0,0,0,.06);
+  }
+  h1 { margin:0 0 6px; font-size:26px; line-height:1.2; color:#143757; font-weight:800; }
+  .sku {
+    display:inline-block; font-family:"SF Mono",Menlo,Consolas,monospace;
+    font-size:15px; color:#374151; background:#F3F4F6;
+    padding:4px 10px; border-radius:6px; margin-right:6px;
+  }
+  .chip {
+    display:inline-block; font-size:13px; color:#4B5563;
+    background:#E5E7EB; padding:4px 10px; border-radius:6px;
+    font-weight:600; text-transform:uppercase; letter-spacing:.03em;
+  }
+  .sub-line { margin-top:6px; }
+  img.foto {
+    width:100%; max-height:320px; object-fit:cover;
+    border-radius:12px; display:block; margin-top:14px;
+    background:#E3E7ED;
+  }
+  .big {
+    font-size:72px; font-weight:800; color:#143757;
+    text-align:center; margin:4px 0 0; line-height:1;
+    letter-spacing:-.02em;
+  }
+  .big-unit { font-size:22px; color:#6B7280; text-align:center; margin-top:6px; font-weight:500; }
+  .big-label { text-align:center; color:#9CA3AF; font-size:13px; margin-top:2px; text-transform:uppercase; letter-spacing:.08em; font-weight:600; }
+  .status {
+    margin-top:14px; padding:12px 16px; border-radius:10px;
+    font-weight:700; text-align:center; font-size:16px;
+  }
+  .status.warn { background:#FEE2E2; color:#991B1B; }
+  .status.ok   { background:#D1FAE5; color:#065F46; }
+  .status.nil  { background:#F3F4F6; color:#6B7280; }
+  .card-title {
+    font-weight:700; color:#374151; font-size:15px;
+    text-transform:uppercase; letter-spacing:.06em;
+    margin-bottom:10px;
+  }
+  table { width:100%; border-collapse:collapse; font-size:17px; }
+  td { padding:14px 4px; border-bottom:1px solid #E5E7EB; }
+  tr:last-child td { border-bottom:none; }
+  .num { text-align:right; font-weight:700; font-family:"SF Mono",Menlo,monospace; }
+  .totals td { padding:12px 4px; font-size:16px; }
+  .totals td:first-child { color:#6B7280; }
+  .totals tr.highlight td { color:#143757; font-weight:700; font-size:17px; }
+  footer {
+    text-align:center; color:#9CA3AF; font-size:13px;
+    padding:16px 20px calc(16px + env(safe-area-inset-bottom));
+  }
+  @media (max-width:360px) {
+    .big { font-size:60px; }
+    h1 { font-size:22px; }
+  }
 </style></head>
 <body>
-<header><strong>📦 Stock · Galpones</strong></header>
+<header>📦 Stock · EQTC</header>
 <div class="wrap">
   <div class="card">
     <h1>${p.Nombre}</h1>
-    <div class="sub">${p.SKU} · ${p.Categoria || ''} · ${p.Subcategoria || ''}</div>
-    ${foto ? `<img src="${foto}" alt="">` : ''}
+    <div class="sub-line">
+      <span class="sku">${p.SKU}</span>${chipText ? `<span class="chip">${chipText}</span>` : ''}
+    </div>
+    ${foto ? `<img class="foto" src="${foto}" alt="" onerror="this.style.display='none'">` : ''}
   </div>
   <div class="card">
+    <div class="big-label">Disponible</div>
     <div class="big">${disponible}</div>
-    <div class="mid">${p.Unidad || ''} disponibles</div>
-    ${alerta ? '<div class="warn">⚠️ Bajo stock mínimo</div>' : (total > 0 ? '<div class="ok">Stock OK</div>' : '')}
+    <div class="big-unit">${unidad}</div>
+    ${alerta
+      ? '<div class="status warn">⚠️ Bajo stock mínimo</div>'
+      : (total > 0
+          ? '<div class="status ok">✓ Stock OK</div>'
+          : '<div class="status nil">Sin stock cargado</div>')}
   </div>
   <div class="card">
-    <strong>Por galpón</strong>
-    <table>${zonasRows}</table>
-    <table style="margin-top:12px">
-      <tr><td>Total físico</td><td style="text-align:right;font-weight:600">${total}</td></tr>
-      <tr><td>Reservado</td><td style="text-align:right">${reservado}</td></tr>
-      <tr><td>Mínimo</td><td style="text-align:right">${minimo}</td></tr>
+    <div class="card-title">Por galpón</div>
+    <table>${zonasRows || '<tr><td colspan="2" style="color:#9CA3AF;text-align:center;">Sin datos</td></tr>'}</table>
+  </div>
+  <div class="card">
+    <div class="card-title">Resumen</div>
+    <table class="totals">
+      <tr class="highlight"><td>Total físico</td><td class="num">${total} ${unidad}</td></tr>
+      <tr><td>Reservado</td><td class="num">${reservado}</td></tr>
+      <tr><td>Mínimo</td><td class="num">${minimo}</td></tr>
     </table>
   </div>
 </div>
+<footer>Escaneado desde la etiqueta · stock en tiempo real</footer>
 </body></html>`;
 
   return HtmlService.createHtmlOutput(html)
