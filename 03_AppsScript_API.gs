@@ -320,7 +320,8 @@ function addMovimiento(params) {
 
 function getStockEnZona(sku, zona) {
   const stock = getStock();
-  const row = stock.find(r => r.SKU === sku);
+  const skuStr = String(sku);
+  const row = stock.find(r => String(r.SKU) === skuStr);
   if (!row) return 0;
   return parseFloat(row[zona] || 0);
 }
@@ -620,7 +621,10 @@ function uploadFoto(params) {
   const file = cat.createFile(blob);
   file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
 
-  const url = `https://drive.google.com/uc?export=view&id=${file.getId()}`;
+  // Usamos el formato "thumbnail" porque drive.google.com/uc?export=view
+  // devuelve 403 al incrustarse como <img> desde otro dominio (Google lo
+  // restringió en 2023+). El endpoint /thumbnail sigue funcionando.
+  const url = `https://drive.google.com/thumbnail?id=${file.getId()}&sz=w1000`;
   updateProductoFotoURL(sku, url);
   return { url, fileId: file.getId() };
 }
@@ -629,9 +633,12 @@ function updateProductoFotoURL(sku, url) {
   const s = sheet(SHEET_PRODUCTOS);
   const last = s.getLastRow();
   if (last < 2) return;
+  // SKU puede venir como Number desde el Sheet si es 100% numérico (EAN),
+  // pero el parametro sku llega como String desde el POST. Normalizar ambos.
+  const skuStr = String(sku);
   const skus = s.getRange(2, 1, last-1, 1).getValues();
   for (let i = 0; i < skus.length; i++) {
-    if (skus[i][0] === sku) {
+    if (String(skus[i][0]) === skuStr) {
       s.getRange(i+2, 6).setValue(url);  // columna F = Foto_URL
       SpreadsheetApp.flush();
       return;
@@ -667,7 +674,8 @@ function generarQR(params) {
   const file = cat.createFile(blob);
   file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
 
-  const url = `https://drive.google.com/uc?export=view&id=${file.getId()}`;
+  // Formato /thumbnail para evitar 403 al incrustar como <img> (ver nota en uploadFoto)
+  const url = `https://drive.google.com/thumbnail?id=${file.getId()}&sz=w1000`;
   updateProductoQRURL(sku, url);
   return { url, qrData, fileId: file.getId() };
 }
@@ -683,9 +691,12 @@ function updateProductoQRURL(sku, url) {
   if ((headers[11] || '') !== 'QR_URL') {
     s.getRange(1, 12).setValue('QR_URL');
   }
+  // Normalizar ambos lados a String: los SKU numericos (EAN) vienen como
+  // Number desde el Sheet pero como String desde el POST.
+  const skuStr = String(sku);
   const skus = s.getRange(2, 1, last-1, 1).getValues();
   for (let i = 0; i < skus.length; i++) {
-    if (skus[i][0] === sku) {
+    if (String(skus[i][0]) === skuStr) {
       s.getRange(i+2, 12).setValue(url);  // columna L = QR_URL
       SpreadsheetApp.flush();
       return;
@@ -697,7 +708,10 @@ function sincronizarFotos() {
   const root = ensureDriveRoot();
   const fotos = ensureFolder(root, 'Fotos');
   const productos = getProducts();
-  const skus = productos.map(p => p.SKU);
+  // Normalizamos a String: los SKU numericos (EAN) se leen como Number del Sheet
+  // pero el regex del nombre del archivo siempre devuelve String → sin esto, los
+  // SKU 100% numericos no matchean y quedan desincronizados.
+  const skus = productos.map(p => String(p.SKU));
   let actualizados = 0;
 
   const cats = fotos.getFolders();
@@ -712,7 +726,8 @@ function sincronizarFotos() {
       const skuEnArchivo = match[1];
       if (skus.indexOf(skuEnArchivo) !== -1) {
         f.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-        const url = `https://drive.google.com/uc?export=view&id=${f.getId()}`;
+        // Formato /thumbnail para evitar 403 al incrustar como <img>
+        const url = `https://drive.google.com/thumbnail?id=${f.getId()}&sz=w1000`;
         updateProductoFotoURL(skuEnArchivo, url);
         actualizados++;
       }
@@ -727,8 +742,9 @@ function servirInfoProductoHTML(sku) {
   sku = (sku || '').trim();
   if (!sku) return HtmlService.createHtmlOutput('<h1>Falta SKU</h1>');
 
-  const p = getProducts().find(pp => pp.SKU === sku);
-  const stock = getStock().find(s => s.SKU === sku);
+  // Normalizar a String ambos lados: los SKU numericos (EAN) se leen como Number del Sheet.
+  const p = getProducts().find(pp => String(pp.SKU) === sku);
+  const stock = getStock().find(s => String(s.SKU) === sku);
 
   if (!p) {
     return HtmlService.createHtmlOutput(

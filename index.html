@@ -224,6 +224,15 @@
   .modal-bg { position:fixed; inset:0; background:rgba(0,0,0,.5); display:none; align-items:flex-end; z-index:100; }
   .modal-bg.open { display:flex; }
   .modal { background:#fff; width:100%; max-width:600px; margin:0 auto; border-radius:16px 16px 0 0; padding:18px; padding-bottom:calc(18px + env(safe-area-inset-bottom)); max-height:92vh; overflow-y:auto; }
+
+  /* Custom dialog (por encima del modal, para confirmaciones dentro de un modal) */
+  .cd-overlay { position:fixed; inset:0; background:rgba(0,0,0,.6); display:flex; align-items:center; justify-content:center; z-index:9999; padding:20px; animation:cd-fade .12s ease-out; }
+  .cd-box { background:#fff; width:100%; max-width:420px; border-radius:14px; padding:20px 20px 18px; box-shadow:0 20px 60px rgba(0,0,0,.35); }
+  .cd-title { font-size:17px; font-weight:700; color:var(--primary); margin-bottom:8px; }
+  .cd-msg { font-size:14px; color:#4B5563; line-height:1.5; margin-bottom:16px; }
+  .cd-btns { display:flex; flex-direction:column; gap:8px; }
+  .cd-btns .btn { width:100%; }
+  @keyframes cd-fade { from{opacity:0; transform:translateY(-4px);} to{opacity:1; transform:translateY(0);} }
   .modal h2 { margin:0 0 12px; font-size:18px; color:var(--primary); }
   .field { margin-bottom:12px; }
   .field label { display:block; font-size:13px; color:var(--muted); margin-bottom:4px; font-weight:500; }
@@ -536,6 +545,71 @@ function initialsOf(name) {
   if (!t) return '?';
   const parts = t.split(/\s+/).filter(Boolean);
   return (parts[0][0] + (parts[1] ? parts[1][0] : '')).toUpperCase();
+}
+
+// Diálogo modal simple con título, mensaje y 1-3 botones. Devuelve una
+// Promise que resuelve con la "key" del botón elegido (o null si se hace
+// click fuera / ESC). Útil para confirmaciones con más de dos opciones
+// (window.confirm sólo permite OK/Cancel).
+// Uso:
+//   const r = await customDialog({
+//     title: '¿Qué hago?',
+//     message: 'Explicación breve…',
+//     buttons: [
+//       { key: 'add',  label: '+ Agregar depósito', kind: 'primary' },
+//       { key: 'skip', label: 'Continuar sin stock', kind: 'secondary' },
+//     ],
+//   });
+function customDialog({ title, message, buttons, dismissable = true }) {
+  return new Promise(resolve => {
+    let done = false;
+    const finish = (key) => {
+      if (done) return; done = true;
+      document.removeEventListener('keydown', onKey);
+      overlay.remove();
+      resolve(key);
+    };
+    const onKey = (e) => { if (e.key === 'Escape' && dismissable) finish(null); };
+
+    const overlay = document.createElement('div');
+    overlay.className = 'cd-overlay';
+    overlay.innerHTML = `
+      <div class="cd-box" role="dialog" aria-modal="true">
+        ${title ? `<div class="cd-title">${attrEsc(title)}</div>` : ''}
+        ${message ? `<div class="cd-msg">${message}</div>` : ''}
+        <div class="cd-btns"></div>
+      </div>`;
+    const btnsWrap = overlay.querySelector('.cd-btns');
+    (buttons || [{ key: 'ok', label: 'OK', kind: 'primary' }]).forEach(b => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn btn-' + (b.kind || 'primary');
+      btn.textContent = b.label;
+      btn.addEventListener('click', () => finish(b.key));
+      btnsWrap.appendChild(btn);
+    });
+    if (dismissable) {
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) finish(null); });
+    }
+    document.addEventListener('keydown', onKey);
+    document.body.appendChild(overlay);
+    // Focus al primer boton para que Enter lo dispare
+    setTimeout(() => { const b = btnsWrap.querySelector('button'); if (b) b.focus(); }, 20);
+  });
+}
+
+// Convierte URLs viejas de Drive (formato uc?export=view&id=X, que Google
+// restringió en 2023+ y devuelve 403 al incrustar como <img>) al formato
+// /thumbnail?id=X&sz=w1000, que sigue funcionando. Las URLs que no son
+// de drive.google.com/uc, o las vacías, se devuelven tal cual.
+// Así evitamos migrar las filas viejas del Sheet — parche del lado cliente.
+function normalizeDriveURL(url) {
+  if (!url) return '';
+  const s = String(url);
+  if (!/drive\.google\.com\/uc\b/.test(s)) return s;
+  const m = s.match(/[?&]id=([A-Za-z0-9_-]+)/);
+  if (!m) return s;
+  return `https://drive.google.com/thumbnail?id=${m[1]}&sz=w1000`;
 }
 
 // ============== ESTADO ==============
@@ -949,7 +1023,12 @@ async function init() {
     // dígitos (ej: SKU de 13 dígitos tipo EAN), y las comparaciones con ===
     // fallan silenciosamente. Tramitamos una sola vez acá.
     const toStr = v => (v == null ? '' : String(v));
-    STATE.productos     = (productos || []).map(p => ({ ...p, SKU: toStr(p.SKU) }));
+    STATE.productos     = (productos || []).map(p => ({
+      ...p,
+      SKU: toStr(p.SKU),
+      Foto_URL: normalizeDriveURL(p.Foto_URL),
+      QR_URL:   normalizeDriveURL(p.QR_URL),
+    }));
     STATE.zonas         = (zonas || []).map(z => ({ ...z, Codigo: toStr(z.Codigo) }));
     STATE.obras         = (obras || []).map(o => ({ ...o, Codigo: toStr(o.Codigo) }));
     STATE.categorias    = categorias || [];
@@ -2413,6 +2492,32 @@ async function submitProducto() {
     if (subcategoria === '__NEW__') subcategoria = (document.getElementById('p-subcat-new').value || '').trim();
     if (!categoria) throw new Error('Falta categoría');
 
+    // --- Validación previa: stock inicial sin depósito ---
+    // Si el usuario puso cantidad > 0 pero no eligió depósito, le avisamos
+    // con un diálogo. Dos opciones: volver a completar la zona, o crear el
+    // producto sin registrar stock inicial.
+    const stockIniCheck = parseFloat(document.getElementById('p-stock').value || '0');
+    const zonaIniCheck  = document.getElementById('p-stock-zona').value;
+    let skipStockInicial = false;
+    if (stockIniCheck > 0 && !zonaIniCheck) {
+      const choice = await customDialog({
+        title: 'No indicaste en qué depósito está',
+        message: `Cargaste <strong>${stockIniCheck}</strong> de stock inicial pero no elegiste un depósito. ¿Qué querés hacer?`,
+        buttons: [
+          { key: 'add',  label: '📍 Agregar depósito',         kind: 'primary'   },
+          { key: 'skip', label: 'Continuar sin agregar stock', kind: 'secondary' },
+        ],
+      });
+      if (choice === 'add' || choice === null) {
+        // Foco en el select para que el usuario lo complete
+        const sel = document.getElementById('p-stock-zona');
+        if (sel) sel.focus();
+        return;
+      }
+      // choice === 'skip': seguimos, pero sin registrar el ingreso inicial
+      skipStockInicial = true;
+    }
+
     const payload = {
       sku: document.getElementById('p-sku').value.trim(),
       nombre: document.getElementById('p-nom').value.trim(),
@@ -2426,18 +2531,17 @@ async function submitProducto() {
     const res = await api('addProducto', payload);
     const sku = res.sku;
 
-    // Stock inicial: si se cargó cantidad+zona, hacer el ingreso automáticamente
+    // Stock inicial: si se cargó cantidad+zona, hacer el ingreso automáticamente.
+    // Si el usuario eligió "Continuar sin agregar stock" arriba, saltamos el ingreso.
     const stockIni = parseFloat(document.getElementById('p-stock').value || '0');
     const zonaIni  = document.getElementById('p-stock-zona').value;
     let msg = `Producto creado ✓ SKU: <strong>${attrEsc(sku)}</strong>`;
-    if (stockIni > 0 && zonaIni) {
+    if (!skipStockInicial && stockIni > 0 && zonaIni) {
       await api('addMovimiento', {
         tipo: 'Ingreso', sku, cantidad: stockIni, zonaDestino: zonaIni,
         usuario: SESSION ? SESSION.user : '', notas: 'Stock inicial (alta de producto)',
       });
       msg += `<br>+ ingreso inicial de <strong>${stockIni}</strong> en <strong>${attrEsc(zonaIni)}</strong> ✓`;
-    } else if (stockIni > 0 && !zonaIni) {
-      msg += '<br><span style="color:var(--warn)">Se cargó cantidad pero no depósito — no se registró ingreso inicial.</span>';
     }
     document.getElementById('prod-msg').innerHTML = `<div class="alert alert-ok">${msg}</div>`;
     await init();
