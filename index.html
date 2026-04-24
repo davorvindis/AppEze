@@ -2735,40 +2735,41 @@ async function generarEtiquetaProducto(sku) {
     ctx.lineWidth = 6;
     ctx.strokeRect(3, 3, W - 6, H - 6);
 
-    // --- Header: rectangulo negro solido con texto blanco ---
+    // --- Header: SIN relleno negro (la termica se funde con areas solidas grandes).
+    // Todo en negro sobre blanco, separado con una linea gruesa abajo.
     const headerH = 130;
-    ctx.fillStyle = BLACK;
-    ctx.fillRect(6, 6, W - 12, headerH);
 
     // Icono de cajita dibujado a trazos (no emoji — los emoji en termica salen feos)
-    // Cuadrado con "tapa" horizontal y una diagonal — estilo icono de package
-    const icoS = 46;
-    const icoX = 118, icoY = (headerH - icoS) / 2 + 6;
-    ctx.strokeStyle = WHITE;
-    ctx.lineWidth = 4;
+    // Cuadrado con "tapa" horizontal, tamaño aumentado para compensar que ahora
+    // no hay fondo negro.
+    const icoS = 54;
+    const icoX = 90, icoY = (headerH - icoS) / 2 + 6;
+    ctx.strokeStyle = BLACK;
+    ctx.lineWidth = 5;
     ctx.lineJoin = 'miter';
     ctx.strokeRect(icoX, icoY, icoS, icoS);
     ctx.beginPath();
-    ctx.moveTo(icoX, icoY + 14);
-    ctx.lineTo(icoX + icoS, icoY + 14);
+    ctx.moveTo(icoX, icoY + 16);
+    ctx.lineTo(icoX + icoS, icoY + 16);
     ctx.stroke();
 
-    // Texto del header en blanco — "STOCK · EQTC"
-    ctx.fillStyle = WHITE;
-    ctx.font = `800 42px ${FONT_SANS}`;
+    // Texto del header en negro — "STOCK · EQTC"
+    ctx.fillStyle = BLACK;
+    ctx.font = `800 46px ${FONT_SANS}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('STOCK · EQTC', W/2 + 36, headerH/2 + 6);
+    ctx.fillText('STOCK · EQTC', W/2 + 34, headerH/2 + 6);
 
-    // --- Doble linea separadora debajo del header ---
+    // --- Doble linea separadora debajo del header (refuerza visualmente
+    // el corte entre el header y el cuerpo, ya sin relleno negro arriba) ---
     ctx.strokeStyle = BLACK;
-    ctx.lineWidth = 4;
+    ctx.lineWidth = 5;
     ctx.beginPath();
-    ctx.moveTo(40, 158); ctx.lineTo(W - 40, 158);
+    ctx.moveTo(30, headerH + 14); ctx.lineTo(W - 30, headerH + 14);
     ctx.stroke();
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(40, 170); ctx.lineTo(W - 40, 170);
+    ctx.moveTo(30, headerH + 26); ctx.lineTo(W - 30, headerH + 26);
     ctx.stroke();
 
     // --- Nombre del producto (bold grande, 2 lineas max, uppercase para legibilidad termica) ---
