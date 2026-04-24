@@ -242,6 +242,9 @@
   .combo-item:last-child { border-bottom:none; }
   .combo-item:hover, .combo-item:active { background:var(--bg); }
   .combo-empty { padding:12px; color:var(--muted); text-align:center; font-size:13px; }
+  .combo-header { padding:6px 12px; font-size:11px; font-weight:600; color:var(--muted); background:var(--bg); text-transform:uppercase; letter-spacing:.04em; border-bottom:1px solid var(--border); position:sticky; top:0; }
+  .combo-recent { background:color-mix(in srgb, var(--accent) 6%, transparent); }
+  .combo-recent:hover { background:color-mix(in srgb, var(--accent) 12%, transparent); }
   .toggle-row input[type=checkbox] { width:18px; height:18px; }
   .toggle-row label { margin:0; font-size:14px; color:var(--text); flex:1; cursor:pointer; }
   .btn-row { display:flex; gap:8px; margin-top:8px; }
@@ -296,6 +299,70 @@
 
   /* App oculto hasta login */
   .app-hidden { display:none !important; }
+
+  /* ================= TOASTS ================= */
+  /* Contenedor fijo arriba, no bloquea clicks */
+  .toast-layer {
+    position:fixed;
+    top:calc(8px + env(safe-area-inset-top));
+    left:8px; right:8px;
+    max-width:560px; margin:0 auto;
+    z-index:200;
+    display:flex; flex-direction:column; gap:8px;
+    pointer-events:none;
+  }
+  .toast {
+    pointer-events:auto;
+    background:#fff; color:var(--text);
+    border-left:4px solid var(--primary);
+    border-radius:10px;
+    padding:12px 14px;
+    box-shadow:0 8px 24px rgba(0,0,0,.18), 0 2px 6px rgba(0,0,0,.08);
+    display:flex; align-items:flex-start; gap:10px;
+    font-size:14px;
+    animation: toast-in .22s cubic-bezier(.2,.9,.3,1.2);
+    position:relative;
+    overflow:hidden;
+  }
+  .toast.toast-ok   { border-left-color:var(--accent); }
+  .toast.toast-err  { border-left-color:var(--warn); }
+  .toast.toast-info { border-left-color:var(--primary); }
+  .toast .toast-icon {
+    flex-shrink:0; width:22px; height:22px;
+    border-radius:50%; display:inline-flex; align-items:center; justify-content:center;
+    font-size:14px; color:#fff; font-weight:700;
+  }
+  .toast.toast-ok   .toast-icon { background:var(--accent); }
+  .toast.toast-err  .toast-icon { background:var(--warn); }
+  .toast.toast-info .toast-icon { background:var(--primary); }
+  .toast .toast-body { flex:1; min-width:0; line-height:1.35; word-wrap:break-word; }
+  .toast .toast-body .toast-title { font-weight:600; }
+  .toast .toast-body .toast-sub { font-size:12.5px; color:var(--muted); margin-top:2px; }
+  .toast .toast-undo {
+    flex-shrink:0; background:var(--primary); color:#fff;
+    border:none; border-radius:6px; padding:6px 10px;
+    font-size:12.5px; font-weight:600; cursor:pointer;
+    align-self:center; white-space:nowrap;
+  }
+  .toast .toast-undo:active { transform:scale(0.96); }
+  .toast .toast-undo:disabled { opacity:.55; cursor:progress; }
+  .toast .toast-x {
+    flex-shrink:0; background:none; border:none; color:var(--muted);
+    font-size:18px; cursor:pointer; padding:0 2px; line-height:1;
+    align-self:flex-start;
+  }
+  .toast-progress {
+    position:absolute; left:0; bottom:0; height:3px;
+    background:var(--primary); opacity:.5;
+    width:100%; transform-origin:left center;
+    animation: toast-progress linear forwards;
+  }
+  .toast.toast-ok .toast-progress  { background:var(--accent); }
+  .toast.toast-err .toast-progress { background:var(--warn); }
+  .toast.closing { animation: toast-out .18s ease-in forwards; }
+  @keyframes toast-in  { from { transform:translateY(-12px); opacity:0 } to { transform:translateY(0); opacity:1 } }
+  @keyframes toast-out { to   { transform:translateY(-16px); opacity:0 } }
+  @keyframes toast-progress { from { transform:scaleX(1) } to { transform:scaleX(0) } }
 
   /* ================= RESPONSIVE: pantallas cortas ================= */
   /* El ancho ya está manejado con clamp() y vw en cada regla. Acá solo
@@ -420,6 +487,9 @@
 
 </main>
 
+<!-- Toasts (arriba de todo, no bloquea clicks) -->
+<div class="toast-layer" id="toast-layer" aria-live="polite" aria-atomic="true"></div>
+
 <!-- FAB -->
 <div class="fab-scrim" id="fab-scrim" aria-hidden="true"></div>
 <div class="fab" id="fab">
@@ -476,11 +546,186 @@ let STATE = {
   egresoBasket: [],
   reservaBasket: [],  // [{sku, zona, cantidad}]
   liberaBasket: [],   // [{sku, zona, obra, cantidad}]
+  // Últimos usados (sólo en esta sesión) — máx 3 c/u, más reciente primero
+  recientes: { skus: [], obras: [], zonas: [] },
 };
 let USUARIOS_LIST = [];  // cache de getUsuarios
 let SESSION = null;      // { user, nombre }
 let PIN_BUF = '';
 let SEL_USER = null;     // usuario seleccionado en el login pre-PIN
+
+// ============== TOASTS / HAPTIC / UNDO ==============
+// Toast flotante arriba. Opciones:
+//   { type: 'ok' | 'err' | 'info', duration: ms, undo: asyncFn, undoLabel: str, sub: str }
+// Si hay `undo`, la duración default es 5000ms y aparece el botón "Deshacer".
+// Si falta `duration` y no hay undo, default 3000ms.
+let _toastSeq = 0;
+function toast(message, opts) {
+  opts = opts || {};
+  const type = opts.type || 'info';
+  const hasUndo = typeof opts.undo === 'function';
+  const duration = opts.duration || (hasUndo ? 5000 : 3000);
+  const layer = document.getElementById('toast-layer');
+  if (!layer) return;
+
+  const id = 'toast-' + (++_toastSeq);
+  const el = document.createElement('div');
+  el.className = 'toast toast-' + type;
+  el.id = id;
+
+  const icon = type === 'ok' ? '✓' : type === 'err' ? '!' : 'i';
+  el.innerHTML = `
+    <span class="toast-icon">${icon}</span>
+    <div class="toast-body">
+      <div class="toast-title"></div>
+      ${opts.sub ? '<div class="toast-sub"></div>' : ''}
+    </div>
+    ${hasUndo ? `<button class="toast-undo" type="button">${attrEsc(opts.undoLabel || 'Deshacer')}</button>` : ''}
+    <button class="toast-x" type="button" aria-label="Cerrar">×</button>
+    <div class="toast-progress" style="animation-duration:${duration}ms;"></div>
+  `;
+  el.querySelector('.toast-title').textContent = message;
+  if (opts.sub) el.querySelector('.toast-sub').textContent = opts.sub;
+
+  const removeEl = () => {
+    if (!el.parentNode) return;
+    el.classList.add('closing');
+    setTimeout(() => el.remove(), 200);
+  };
+
+  // Timer de auto-cierre (pausa si se hovea)
+  let timer = setTimeout(removeEl, duration);
+  el.addEventListener('mouseenter', () => { clearTimeout(timer); el.querySelector('.toast-progress').style.animationPlayState = 'paused'; });
+  el.addEventListener('mouseleave', () => { timer = setTimeout(removeEl, 1500); el.querySelector('.toast-progress').style.animationPlayState = 'running'; });
+
+  // Cerrar
+  el.querySelector('.toast-x').addEventListener('click', () => { clearTimeout(timer); removeEl(); });
+
+  // Undo
+  if (hasUndo) {
+    const btn = el.querySelector('.toast-undo');
+    btn.addEventListener('click', async () => {
+      btn.disabled = true; btn.textContent = '...';
+      clearTimeout(timer);
+      try {
+        await opts.undo();
+        btn.textContent = 'Hecho ✓';
+        haptic('ok');
+        setTimeout(removeEl, 900);
+      } catch (err) {
+        btn.disabled = false; btn.textContent = 'Reintentar';
+        toast('No se pudo deshacer: ' + (err.message || err), { type: 'err' });
+        haptic('err');
+      }
+    });
+  }
+
+  layer.appendChild(el);
+  return { id, close: removeEl };
+}
+
+// Vibración háptica (silenciosa si el device no lo soporta o el user la desactivó)
+function haptic(kind) {
+  if (!navigator.vibrate) return;
+  try {
+    if (kind === 'ok')       navigator.vibrate(30);
+    else if (kind === 'err') navigator.vibrate([50, 50, 50]);
+    else if (kind === 'tap') navigator.vibrate(10);
+    else                     navigator.vibrate(kind); // array custom
+  } catch (_) {}
+}
+
+// Empuja valores al tope de recientes (más nuevo primero, sin duplicados, máx 3).
+function pushReciente(bucket, value) {
+  if (!value) return;
+  const arr = STATE.recientes[bucket];
+  if (!arr) return;
+  const idx = arr.indexOf(value);
+  if (idx !== -1) arr.splice(idx, 1);
+  arr.unshift(value);
+  if (arr.length > 3) arr.length = 3;
+}
+
+// Genera <option>s de zonas con los últimos usados arriba (en optgroup separador).
+// No agrega placeholder "-- elegir --" (eso lo pone cada caller).
+function buildZonaOptions() {
+  const all = STATE.zonas || [];
+  const recents = (STATE.recientes && STATE.recientes.zonas) || [];
+  const recentCodes = new Set(recents.filter(c => all.some(z => z.Codigo === c)));
+  let html = '';
+  if (recentCodes.size > 0) {
+    html += '<optgroup label="Últimos usados">';
+    for (const c of recents) {
+      const z = all.find(zz => zz.Codigo === c);
+      if (z) html += `<option value="${attrEsc(z.Codigo)}">★ ${attrEsc(z.Nombre)}</option>`;
+    }
+    html += '</optgroup><optgroup label="Todos los galpones">';
+  }
+  html += all.map(z => `<option value="${attrEsc(z.Codigo)}">${attrEsc(z.Nombre)}</option>`).join('');
+  if (recentCodes.size > 0) html += '</optgroup>';
+  return html;
+}
+
+// Genera <option>s de obras con los últimos usados arriba. Por default filtra finalizadas.
+function buildObraOptions(opts) {
+  opts = opts || {};
+  const onlyActive = opts.onlyActive !== false; // default true
+  const base = (STATE.obras || []).filter(o => onlyActive ? o.Estado !== 'Finalizada' : true);
+  const recents = (STATE.recientes && STATE.recientes.obras) || [];
+  const recentCodes = new Set(recents.filter(c => base.some(o => o.Codigo === c)));
+  let html = '';
+  if (recentCodes.size > 0) {
+    html += '<optgroup label="Últimas usadas">';
+    for (const c of recents) {
+      const o = base.find(oo => oo.Codigo === c);
+      if (o) html += `<option value="${attrEsc(o.Codigo)}">★ ${attrEsc(o.Codigo)} — ${attrEsc(o.Nombre)}</option>`;
+    }
+    html += '</optgroup><optgroup label="Todas las obras">';
+  }
+  html += base.map(o => `<option value="${attrEsc(o.Codigo)}">${attrEsc(o.Codigo)} — ${attrEsc(o.Nombre)}</option>`).join('');
+  if (recentCodes.size > 0) html += '</optgroup>';
+  return html;
+}
+
+// Construye el movimiento inverso. Devuelve null si no se puede anular cleanly.
+// Convención del CLAUDE.md: anular = emitir movimiento inverso, nunca borrar.
+function inverseMovimiento(mov) {
+  if (!mov || !mov.tipo) return null;
+  const base = {
+    sku: mov.sku,
+    cantidad: mov.cantidad,
+    usuario: SESSION ? SESSION.user : '',
+    notas: 'Undo automático' + (mov.notas ? ' · ' + mov.notas : ''),
+  };
+  switch (mov.tipo) {
+    case 'Reserva':        return { ...base, tipo: 'Libera_Reserva', zonaOrigen: mov.zonaOrigen, obra: mov.obra };
+    case 'Libera_Reserva': return { ...base, tipo: 'Reserva',        zonaOrigen: mov.zonaOrigen, obra: mov.obra };
+    case 'Traslado':       return { ...base, tipo: 'Traslado',       zonaOrigen: mov.zonaDestino, zonaDestino: mov.zonaOrigen };
+    case 'Egreso':         return { ...base, tipo: 'Ingreso',        zonaDestino: mov.zonaOrigen, notas: base.notas + ' (reingreso por anulación)' };
+    case 'Ingreso':        return { ...base, tipo: 'Ajuste',         zonaOrigen: mov.zonaDestino, motivo: 'Anulación de ingreso', cantidad: -Math.abs(mov.cantidad) };
+    case 'Ajuste':         return { ...base, tipo: 'Ajuste',         zonaOrigen: mov.zonaOrigen,  motivo: 'Anulación de ajuste',  cantidad: -Number(mov.cantidad) };
+    default:               return null;
+  }
+}
+
+// Dispara el movimiento inverso vía API y refresca datos.
+async function anularMovimiento(mov) {
+  const inv = inverseMovimiento(mov);
+  if (!inv) throw new Error('Este tipo de movimiento no se puede deshacer automáticamente');
+  await api('addMovimiento', inv);
+  await init();
+}
+
+// Anula un lote de movimientos en orden inverso (último primero, para respetar la cadena).
+async function undoBatch(movs) {
+  if (!Array.isArray(movs) || movs.length === 0) return;
+  for (let i = movs.length - 1; i >= 0; i--) {
+    const inv = inverseMovimiento(movs[i]);
+    if (!inv) throw new Error('Este lote contiene un movimiento no reversible');
+    await api('addMovimiento', inv);
+  }
+  await init();
+}
 
 // ============== SESIÓN ==============
 function loadSession() {
@@ -800,17 +1045,42 @@ function comboFilter(hiddenId, text, showAll) {
   // Si el usuario edita el texto, invalido la selección previa (va a tener que re-elegir)
   if (!showAll && hidden) hidden.value = '';
   const t = (text || '').toLowerCase().trim();
+
+  // Si el combo es de SKUs (único con recientes por ahora) y no hay filtro,
+  // pongo los últimos 3 usados arriba con un header visual.
+  const bucket = hiddenId === 'f-sku' ? 'skus'
+              : hiddenId === 'eg-sku' ? 'skus'
+              : hiddenId === 'rv-sku' ? 'skus'
+              : hiddenId === 'lr-sku' ? 'skus'
+              : null;
+
+  let html = '';
+  if (!t && bucket) {
+    const recents = (STATE.recientes && STATE.recientes[bucket]) || [];
+    const recentItems = recents.map(v => items.find(it => it.value === v)).filter(Boolean);
+    if (recentItems.length > 0) {
+      html += '<div class="combo-header">★ Últimos usados</div>';
+      html += recentItems.map(it =>
+        `<div class="combo-item combo-recent" onmousedown="event.preventDefault()" onclick='comboSelect(${jsStr(hiddenId)}, ${jsStr(it.value)})'>${attrEsc(it.label)}</div>`
+      ).join('');
+      html += '<div class="combo-header">Todos</div>';
+    }
+  }
+
   let filtered = items;
   if (t) {
     filtered = items.filter(it => (it.hay || it.label || '').toLowerCase().includes(t));
   }
-  if (filtered.length === 0) {
-    list.innerHTML = '<div class="combo-empty">Sin resultados</div>';
+  if (filtered.length === 0 && !html) {
+    html = '<div class="combo-empty">Sin resultados</div>';
+  } else if (filtered.length === 0) {
+    // Sólo queda el bloque de recientes
   } else {
-    list.innerHTML = filtered.slice(0, 80).map(it =>
+    html += filtered.slice(0, 80).map(it =>
       `<div class="combo-item" onmousedown="event.preventDefault()" onclick='comboSelect(${jsStr(hiddenId)}, ${jsStr(it.value)})'>${attrEsc(it.label)}</div>`
     ).join('');
   }
+  list.innerHTML = html;
   list.classList.add('open');
 }
 
@@ -951,9 +1221,8 @@ function openMovimiento(tipo, skuPreseleccionado) {
   if (tipo === 'Libera_Reserva') productosList = productosConReserva();
   else if (tipo === 'Traslado' || tipo === 'Reserva') productosList = productosConStock();
   else productosList = STATE.productos;
-  const zonaOptions = STATE.zonas.map(z => `<option value="${attrEsc(z.Codigo)}">${attrEsc(z.Nombre)}</option>`).join('');
-  const obraOptions = STATE.obras.filter(o => o.Estado !== 'Finalizada')
-    .map(o => `<option value="${attrEsc(o.Codigo)}">${attrEsc(o.Codigo)} — ${attrEsc(o.Nombre)}</option>`).join('');
+  const zonaOptions = buildZonaOptions();
+  const obraOptions = buildObraOptions({ onlyActive: true });
 
   let packBlock = '';
   if (tipo === 'Ingreso' || tipo === 'Traslado') {
@@ -1216,10 +1485,25 @@ async function submitMovimiento(tipo) {
       if (!confirm(`¿Confirmás este ${signo} de ${abs}${unidad} de "${nomProd}" por "${motivo}"?`)) return;
     }
     await api('addMovimiento', payload);
-    document.getElementById('mov-msg').innerHTML = `<div class="alert alert-ok">Movimiento registrado ✓</div>`;
-    setTimeout(() => { closeModal(); init(); }, 600);
+
+    // Recientes: último SKU/obra/zona elegidos para el autocompletar
+    pushReciente('skus', sku);
+    if (payload.obra) pushReciente('obras', payload.obra);
+    if (payload.zonaOrigen) pushReciente('zonas', payload.zonaOrigen);
+    if (payload.zonaDestino) pushReciente('zonas', payload.zonaDestino);
+
+    closeModal();
+    haptic('ok');
+    toast(`${tipoLabel(tipo)} registrado`, {
+      type: 'ok',
+      undo: () => anularMovimiento(payload),
+    });
+    init();
   } catch (err) {
-    document.getElementById('mov-msg').innerHTML = `<div class="alert alert-err">${attrEsc(err.message)}</div>`;
+    haptic('err');
+    const msgEl = document.getElementById('mov-msg');
+    if (msgEl) msgEl.innerHTML = `<div class="alert alert-err">${attrEsc(err.message)}</div>`;
+    toast(err.message || 'Error desconocido', { type: 'err' });
   }
 }
 
@@ -1239,8 +1523,7 @@ function openEgresoMasivo(skuPreseleccionado) {
     STATE.egresoBasket.push({ sku: '', zona: '', cantidad: '' });
   }
 
-  const obraOptions = STATE.obras.filter(o => o.Estado !== 'Finalizada')
-    .map(o => `<option value="${attrEsc(o.Codigo)}">${attrEsc(o.Codigo)} — ${attrEsc(o.Nombre)}</option>`).join('');
+  const obraOptions = buildObraOptions({ onlyActive: true });
 
   openModal(`
     <h2>→ Egreso a Obra</h2>
@@ -1364,37 +1647,52 @@ function validarEgresoBasket() {
 async function submitEgresoMasivo() {
   const obra = document.getElementById('eg-obra').value;
   const notas = document.getElementById('eg-notas').value;
-  if (!obra) { document.getElementById('mov-msg').innerHTML = '<div class="alert alert-err">Elegí una obra</div>'; return; }
+  if (!obra) { document.getElementById('mov-msg').innerHTML = '<div class="alert alert-err">Elegí una obra</div>'; haptic('err'); return; }
 
   const lineas = STATE.egresoBasket.filter(l => {
     const c = parseFloat(l.cantidad || '0');
     return l.sku && l.zona && c > 0;
   });
-  if (lineas.length === 0) { document.getElementById('mov-msg').innerHTML = '<div class="alert alert-err">Cargá al menos un producto</div>'; return; }
+  if (lineas.length === 0) { document.getElementById('mov-msg').innerHTML = '<div class="alert alert-err">Cargá al menos un producto</div>'; haptic('err'); return; }
 
   document.getElementById('mov-msg').innerHTML = `<div class="alert alert-info">Guardando ${lineas.length} egresos...</div>`;
 
+  const emitted = [];
   let okCount = 0, errs = [];
   for (const l of lineas) {
+    const payload = {
+      tipo: 'Egreso', sku: l.sku, cantidad: parseFloat(l.cantidad),
+      zonaOrigen: l.zona, obra,
+      usuario: SESSION ? SESSION.user : '',
+      notas,
+    };
     try {
-      await api('addMovimiento', {
-        tipo: 'Egreso', sku: l.sku, cantidad: parseFloat(l.cantidad),
-        zonaOrigen: l.zona, obra,
-        usuario: SESSION ? SESSION.user : '',
-        notas,
-      });
+      await api('addMovimiento', payload);
+      emitted.push(payload);
       okCount++;
     } catch (err) {
       errs.push(`${l.sku}: ${err.message}`);
     }
   }
   if (errs.length === 0) {
-    document.getElementById('mov-msg').innerHTML = `<div class="alert alert-ok">${okCount} egresos registrados ✓</div>`;
-    setTimeout(() => { closeModal(); init(); }, 700);
+    pushReciente('obras', obra);
+    for (const m of emitted) { pushReciente('skus', m.sku); pushReciente('zonas', m.zonaOrigen); }
+    closeModal();
+    haptic('ok');
+    toast(`${okCount} ${okCount === 1 ? 'egreso registrado' : 'egresos registrados'}`, {
+      type: 'ok',
+      undo: () => undoBatch(emitted),
+    });
+    init();
   } else {
+    haptic('err');
     document.getElementById('mov-msg').innerHTML =
       `<div class="alert alert-ok">${okCount} OK</div>` +
       `<div class="alert alert-err">${errs.length} con error:<br>${errs.map(attrEsc).join('<br>')}</div>`;
+    toast(`${errs.length} ${errs.length === 1 ? 'egreso falló' : 'egresos fallaron'}`, {
+      type: 'err',
+      sub: okCount ? `${okCount} OK, ${errs.length} con error` : '',
+    });
     init();
   }
 }
@@ -1414,8 +1712,7 @@ function openReservaMasiva(skuPreseleccionado) {
     STATE.reservaBasket.push({ sku: '', zona: '', cantidad: '' });
   }
 
-  const obraOptions = STATE.obras.filter(o => o.Estado !== 'Finalizada')
-    .map(o => `<option value="${attrEsc(o.Codigo)}">${attrEsc(o.Codigo)} — ${attrEsc(o.Nombre)}</option>`).join('');
+  const obraOptions = buildObraOptions({ onlyActive: true });
 
   openModal(`
     <h2>📌 Reservar para Obra</h2>
@@ -1539,37 +1836,52 @@ function validarReservaBasket() {
 async function submitReservaMasiva() {
   const obra = document.getElementById('rv-obra').value;
   const notas = document.getElementById('rv-notas').value;
-  if (!obra) { document.getElementById('mov-msg').innerHTML = '<div class="alert alert-err">Elegí una obra</div>'; return; }
+  if (!obra) { document.getElementById('mov-msg').innerHTML = '<div class="alert alert-err">Elegí una obra</div>'; haptic('err'); return; }
 
   const lineas = STATE.reservaBasket.filter(l => {
     const c = parseFloat(l.cantidad || '0');
     return l.sku && l.zona && c > 0;
   });
-  if (lineas.length === 0) { document.getElementById('mov-msg').innerHTML = '<div class="alert alert-err">Cargá al menos un producto</div>'; return; }
+  if (lineas.length === 0) { document.getElementById('mov-msg').innerHTML = '<div class="alert alert-err">Cargá al menos un producto</div>'; haptic('err'); return; }
 
   document.getElementById('mov-msg').innerHTML = `<div class="alert alert-info">Guardando ${lineas.length} reservas...</div>`;
 
+  const emitted = [];
   let okCount = 0, errs = [];
   for (const l of lineas) {
+    const payload = {
+      tipo: 'Reserva', sku: l.sku, cantidad: parseFloat(l.cantidad),
+      zonaOrigen: l.zona, obra,
+      usuario: SESSION ? SESSION.user : '',
+      notas,
+    };
     try {
-      await api('addMovimiento', {
-        tipo: 'Reserva', sku: l.sku, cantidad: parseFloat(l.cantidad),
-        zonaOrigen: l.zona, obra,
-        usuario: SESSION ? SESSION.user : '',
-        notas,
-      });
+      await api('addMovimiento', payload);
+      emitted.push(payload);
       okCount++;
     } catch (err) {
       errs.push(`${l.sku}: ${err.message}`);
     }
   }
   if (errs.length === 0) {
-    document.getElementById('mov-msg').innerHTML = `<div class="alert alert-ok">${okCount} reservas registradas ✓</div>`;
-    setTimeout(() => { closeModal(); init(); }, 700);
+    pushReciente('obras', obra);
+    for (const m of emitted) { pushReciente('skus', m.sku); pushReciente('zonas', m.zonaOrigen); }
+    closeModal();
+    haptic('ok');
+    toast(`${okCount} ${okCount === 1 ? 'reserva registrada' : 'reservas registradas'}`, {
+      type: 'ok',
+      undo: () => undoBatch(emitted),
+    });
+    init();
   } else {
+    haptic('err');
     document.getElementById('mov-msg').innerHTML =
       `<div class="alert alert-ok">${okCount} OK</div>` +
       `<div class="alert alert-err">${errs.length} con error:<br>${errs.map(attrEsc).join('<br>')}</div>`;
+    toast(`${errs.length} ${errs.length === 1 ? 'reserva falló' : 'reservas fallaron'}`, {
+      type: 'err',
+      sub: okCount ? `${okCount} OK, ${errs.length} con error` : '',
+    });
     init();
   }
 }
@@ -1824,7 +2136,7 @@ async function submitLiberaMasiva() {
     if (l.destTipo === 'obra' && !l.destObra) return false;
     return true;
   });
-  if (lineas.length === 0) { document.getElementById('mov-msg').innerHTML = '<div class="alert alert-err">Cargá al menos una reserva con destino</div>'; return; }
+  if (lineas.length === 0) { document.getElementById('mov-msg').innerHTML = '<div class="alert alert-err">Cargá al menos una reserva con destino</div>'; haptic('err'); return; }
 
   // Calcular total de movimientos a crear para mostrar progreso real
   const totalMovs = lineas.reduce((a, l) => {
@@ -1838,35 +2150,47 @@ async function submitLiberaMasiva() {
   document.getElementById('mov-msg').innerHTML = `<div class="alert alert-info">Procesando ${lineas.length} ${lineas.length === 1 ? 'reserva' : 'reservas'} (${totalMovs} movimientos)...</div>`;
 
   const usuario = SESSION ? SESSION.user : '';
+  const emitted = [];
   let okCount = 0, errs = [];
 
   for (const l of lineas) {
     const cant = parseFloat(l.cantidad);
     try {
       // 1) Siempre libero la reserva primero
-      await api('addMovimiento', {
+      const libPayload = {
         tipo: 'Libera_Reserva', sku: l.sku, cantidad: cant,
         zonaOrigen: l.zona, obra: l.obra,
         usuario, notas: notas ? `[Libera] ${notas}` : '',
-      });
+      };
+      await api('addMovimiento', libPayload);
+      emitted.push(libPayload);
 
       // 2) Traslado a otro galpón (opcional)
       if (l.destTipo === 'galpon' && l.destZona && l.destZona !== l.zona) {
-        await api('addMovimiento', {
+        const trsPayload = {
           tipo: 'Traslado', sku: l.sku, cantidad: cant,
           zonaOrigen: l.zona, zonaDestino: l.destZona,
           usuario, notas: notas ? `[Traslado post-libera] ${notas}` : 'Traslado por liberación de reserva',
-        });
+        };
+        await api('addMovimiento', trsPayload);
+        emitted.push(trsPayload);
       }
 
       // 3) Egreso a obra distinta (opcional)
       if (l.destTipo === 'obra' && l.destObra) {
-        await api('addMovimiento', {
+        const egrPayload = {
           tipo: 'Egreso', sku: l.sku, cantidad: cant,
           zonaOrigen: l.zona, obra: l.destObra,
           usuario, notas: notas ? `[Egreso post-libera] ${notas}` : 'Egreso por reasignación de reserva',
-        });
+        };
+        await api('addMovimiento', egrPayload);
+        emitted.push(egrPayload);
       }
+
+      // Recientes
+      pushReciente('skus', l.sku);
+      pushReciente('zonas', l.zona);
+      pushReciente('obras', l.obra);
 
       okCount++;
     } catch (err) {
@@ -1875,12 +2199,23 @@ async function submitLiberaMasiva() {
   }
 
   if (errs.length === 0) {
-    document.getElementById('mov-msg').innerHTML = `<div class="alert alert-ok">${okCount} ${okCount === 1 ? 'reserva liberada' : 'reservas liberadas'} ✓</div>`;
-    setTimeout(() => { closeModal(); init(); }, 800);
+    closeModal();
+    haptic('ok');
+    toast(`${okCount} ${okCount === 1 ? 'reserva liberada' : 'reservas liberadas'}`, {
+      type: 'ok',
+      sub: totalMovs > okCount ? `${totalMovs} movimientos emitidos` : '',
+      undo: () => undoBatch(emitted),
+    });
+    init();
   } else {
+    haptic('err');
     document.getElementById('mov-msg').innerHTML =
       `<div class="alert alert-ok">${okCount} OK</div>` +
       `<div class="alert alert-err">${errs.length} con error:<br>${errs.map(attrEsc).join('<br>')}</div>`;
+    toast(`${errs.length} con error al liberar`, {
+      type: 'err',
+      sub: okCount ? `${okCount} OK, ${errs.length} falló` : '',
+    });
     init();
   }
 }
