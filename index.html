@@ -11,7 +11,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Stock">
 <link rel="apple-touch-icon" href="icon-192.png">
-<title>Stock · Galpones</title>
+<title>Stock · EQTC</title>
 <!-- Google Maps -->
 <script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAKJaDquxnEcr_Dkfvb-6DS-1B3R3zSwyA&callback=_gmapsReady"></script>
 <script>let _gmapsLoaded=false; function _gmapsReady(){_gmapsLoaded=true;}</script>
@@ -388,7 +388,7 @@
 <!-- ================= LOGIN ================= -->
 <div id="login-view">
   <div class="login-logo">📦</div>
-  <h1 class="login-title">Stock · Galpones</h1>
+  <h1 class="login-title">Stock · EQTC</h1>
   <div class="login-sub" id="login-sub">Elegí tu usuario</div>
 
   <!-- Paso 1: seleccionar usuario -->
@@ -429,7 +429,7 @@
 
 <header>
   <div class="top">
-    <h1>📦 Stock · Galpones</h1>
+    <h1>📦 Stock · EQTC</h1>
     <div class="user-chip" onclick="confirmLogout()" title="Cerrar sesión">
       <div class="avatar-xs" id="hdr-avatar">?</div>
       <span id="hdr-nombre">—</span>
@@ -1225,7 +1225,6 @@ function showDetalle(sku) {
     <div class="btn-row" style="margin-top:8px;">
       <button class="btn btn-accent" onclick='openSubirFoto(${jsStr(sku)})'>${prod.Foto_URL ? '📷 Cambiar foto' : '📷 Foto'}</button>
       <button class="btn btn-purple" onclick='generarEtiquetaProducto(${jsStr(sku)})'>🏷️ Etiqueta</button>
-      ${prod.QR_URL ? '' : `<button class="btn btn-primary" onclick='generarQRProducto(${jsStr(sku)})'>🔗 QR</button>`}
     </div>
     ${prod.QR_URL ? `
       <div class="alert alert-ok" style="margin-top:8px;">QR ya generado ✓</div>
@@ -2596,9 +2595,10 @@ function blobToBase64(blob) {
 }
 
 // ============== ETIQUETA PNG (TERMICA B&N) ==============
-// Generamos una etiqueta 600x900 pura blanco-y-negro para impresoras termicas.
-// Sin grises, sin emojis, sin gradientes, sin sombras. Todo tinta solida y
-// bordes gruesos — lo unico que una termica imprime de forma fiable.
+// Generamos una etiqueta 800x1200 px (10cm x 15cm @ ~200 DPI, formato vertical)
+// pura blanco-y-negro para impresoras termicas. Sin grises, sin emojis,
+// sin gradientes, sin sombras. Todo tinta solida y bordes gruesos — lo unico
+// que una termica imprime de forma fiable.
 // Todo se arma en el cliente con canvas → PNG → descarga directa (no toca Drive).
 async function generarEtiquetaProducto(sku) {
   const prod = STATE.productos.find(p => p.SKU === sku);
@@ -2608,11 +2608,11 @@ async function generarEtiquetaProducto(sku) {
   try {
     // 1) QR en alta res via api.qrserver.com (CORS abierto → canvas exportable).
     const qrDestino = `${API_URL}?action=infoProducto&sku=${encodeURIComponent(sku)}`;
-    const qrApiUrl  = `https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(qrDestino)}&size=500x500&margin=1&format=png&ecc=H&color=000000&bgcolor=FFFFFF`;
+    const qrApiUrl  = `https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(qrDestino)}&size=700x700&margin=1&format=png&ecc=H&color=000000&bgcolor=FFFFFF`;
     const qrImg = await _loadImageCors(qrApiUrl);
 
-    // 2) Compongo la etiqueta.
-    const W = 600, H = 900;
+    // 2) Compongo la etiqueta. 10 cm x 15 cm @ ~200 DPI → 800 x 1200 px (portrait).
+    const W = 800, H = 1200;
     const canvas = document.createElement('canvas');
     canvas.width = W; canvas.height = H;
     const ctx = canvas.getContext('2d');
@@ -2626,98 +2626,107 @@ async function generarEtiquetaProducto(sku) {
     ctx.fillStyle = WHITE;
     ctx.fillRect(0, 0, W, H);
 
-    // Borde exterior negro grueso (4px, para que la etiqueta tenga marco claro)
+    // Borde exterior negro grueso (6px) — marco claro de la etiqueta
     ctx.strokeStyle = BLACK;
-    ctx.lineWidth = 4;
-    ctx.strokeRect(2, 2, W - 4, H - 4);
+    ctx.lineWidth = 6;
+    ctx.strokeRect(3, 3, W - 6, H - 6);
 
     // --- Header: rectangulo negro solido con texto blanco ---
+    const headerH = 130;
     ctx.fillStyle = BLACK;
-    ctx.fillRect(4, 4, W - 8, 96);
+    ctx.fillRect(6, 6, W - 12, headerH);
 
     // Icono de cajita dibujado a trazos (no emoji — los emoji en termica salen feos)
     // Cuadrado con "tapa" horizontal y una diagonal — estilo icono de package
-    const icoX = 90, icoY = 38, icoS = 34;
+    const icoS = 46;
+    const icoX = 118, icoY = (headerH - icoS) / 2 + 6;
     ctx.strokeStyle = WHITE;
-    ctx.lineWidth = 3;
+    ctx.lineWidth = 4;
     ctx.lineJoin = 'miter';
     ctx.strokeRect(icoX, icoY, icoS, icoS);
     ctx.beginPath();
-    ctx.moveTo(icoX, icoY + 10);
-    ctx.lineTo(icoX + icoS, icoY + 10);
+    ctx.moveTo(icoX, icoY + 14);
+    ctx.lineTo(icoX + icoS, icoY + 14);
     ctx.stroke();
 
-    // Texto del header en blanco
+    // Texto del header en blanco — "STOCK · EQTC"
     ctx.fillStyle = WHITE;
-    ctx.font = `800 30px ${FONT_SANS}`;
+    ctx.font = `800 42px ${FONT_SANS}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('STOCK · GALPONES', W/2 + 25, 52);
+    ctx.fillText('STOCK · EQTC', W/2 + 36, headerH/2 + 6);
 
     // --- Doble linea separadora debajo del header ---
     ctx.strokeStyle = BLACK;
-    ctx.lineWidth = 3;
+    ctx.lineWidth = 4;
     ctx.beginPath();
-    ctx.moveTo(30, 118); ctx.lineTo(W - 30, 118);
+    ctx.moveTo(40, 158); ctx.lineTo(W - 40, 158);
     ctx.stroke();
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(30, 126); ctx.lineTo(W - 30, 126);
+    ctx.moveTo(40, 170); ctx.lineTo(W - 40, 170);
     ctx.stroke();
 
     // --- Nombre del producto (bold grande, 2 lineas max, uppercase para legibilidad termica) ---
     ctx.fillStyle = BLACK;
-    ctx.font = `800 36px ${FONT_SANS}`;
+    ctx.font = `800 48px ${FONT_SANS}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     const nombreUpper = (prod.Nombre || '').trim().toUpperCase();
-    const nombreLines = _wrapText(ctx, nombreUpper, W - 60, 2);
-    const nombreStartY = nombreLines.length === 1 ? 180 : 162;
-    nombreLines.forEach((line, i) => ctx.fillText(line, W/2, nombreStartY + i * 44));
+    const nombreLines = _wrapText(ctx, nombreUpper, W - 80, 2);
+    const nombreBlockTop = 195;
+    const nombreBlockH = 110; // reserva 2 lineas
+    const nombreStartY = nombreLines.length === 1
+      ? nombreBlockTop + nombreBlockH/2
+      : nombreBlockTop + 32;
+    nombreLines.forEach((line, i) => ctx.fillText(line, W/2, nombreStartY + i * 58));
 
     // --- Caja de categoria / subcategoria (rectangulo con borde negro, sin fill gris) ---
     const catLabel = (prod.Subcategoria || prod.Categoria || '').trim().toUpperCase();
     if (catLabel) {
-      ctx.font = `700 20px ${FONT_SANS}`;
-      const padX = 18, boxH = 38;
+      ctx.font = `700 26px ${FONT_SANS}`;
+      const padX = 24, boxH = 50;
       const textW = ctx.measureText(catLabel).width;
-      const boxW = Math.min(textW + padX * 2, W - 80);
+      const boxW = Math.min(textW + padX * 2, W - 120);
       const boxX = (W - boxW) / 2;
-      const boxY = 252;
-      ctx.lineWidth = 3;
+      const boxY = 338;
+      ctx.lineWidth = 4;
       ctx.strokeRect(boxX, boxY, boxW, boxH);
       ctx.fillStyle = BLACK;
       ctx.fillText(catLabel, W/2, boxY + boxH/2 + 1);
     }
 
     // --- QR con marco negro grueso (sin card gris) ---
-    const qrFrameX = 55, qrFrameY = 312, qrFrameSize = W - 110;
-    ctx.lineWidth = 4;
+    // El QR es el protagonista: lo mas grande posible manteniendo margenes decentes.
+    const qrFrameSize = 620;
+    const qrFrameX = (W - qrFrameSize) / 2;
+    const qrFrameY = 420;
+    ctx.lineWidth = 5;
     ctx.strokeRect(qrFrameX, qrFrameY, qrFrameSize, qrFrameSize);
-    // QR interno, con padding de 12px blanco para no pisar el marco
-    const qrPad = 12;
+    // QR interno, con padding de 16px blanco para no pisar el marco
+    const qrPad = 16;
     const qrSize = qrFrameSize - qrPad * 2;
     ctx.drawImage(qrImg, qrFrameX + qrPad, qrFrameY + qrPad, qrSize, qrSize);
 
     // --- Doble linea separadora antes del SKU ---
-    const sepY = qrFrameY + qrFrameSize + 22;
-    ctx.lineWidth = 3;
+    const sepY = qrFrameY + qrFrameSize + 30;
+    ctx.lineWidth = 4;
     ctx.beginPath();
-    ctx.moveTo(30, sepY); ctx.lineTo(W - 30, sepY);
+    ctx.moveTo(40, sepY); ctx.lineTo(W - 40, sepY);
     ctx.stroke();
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(30, sepY + 8); ctx.lineTo(W - 30, sepY + 8);
+    ctx.moveTo(40, sepY + 10); ctx.lineTo(W - 40, sepY + 10);
     ctx.stroke();
 
     // --- SKU en monospace bold, GIGANTE, negro puro ---
     ctx.fillStyle = BLACK;
-    ctx.font = `800 42px ${FONT_MONO}`;
-    ctx.fillText(prod.SKU || '', W/2, sepY + 48);
+    ctx.font = `800 54px ${FONT_MONO}`;
+    ctx.fillText(prod.SKU || '', W/2, sepY + 58);
 
     // --- Footer: texto instruccional, todo negro (no gris) ---
-    ctx.font = `600 16px ${FONT_SANS}`;
-    ctx.fillText('ESCANEA PARA VER STOCK EN TIEMPO REAL', W/2, sepY + 84);
+    ctx.font = `600 22px ${FONT_SANS}`;
+    ctx.fillText('ESCANEA PARA VER STOCK EN TIEMPO REAL', W/2, sepY + 108);
 
     // 3) Descargo el PNG
     const pngBlob = await new Promise(r => canvas.toBlob(r, 'image/png'));
@@ -2731,8 +2740,8 @@ async function generarEtiquetaProducto(sku) {
     // 4) Preview en el container del modal
     if (container) container.innerHTML = `
       <div class="alert alert-ok">Etiqueta generada y descargada ✓</div>
-      <img src="${pngUrl}" alt="Etiqueta ${attrEsc(sku)}" style="max-width:280px;display:block;margin:10px auto;border:1px solid #ddd;">
-      <div class="hint" style="text-align:center;">PNG 600×900 blanco y negro puro — optimizado para impresora térmica. También imprime OK en láser/inkjet (entran ~6 en A4).</div>`;
+      <img src="${pngUrl}" alt="Etiqueta ${attrEsc(sku)}" style="max-width:260px;display:block;margin:10px auto;border:1px solid #ddd;">
+      <div class="hint" style="text-align:center;">PNG 800×1200 px blanco y negro puro — formato 10×15 cm (vertical), optimizado para impresora térmica. También imprime OK en láser/inkjet sobre etiqueta adhesiva 10×15.</div>`;
   } catch (err) {
     if (container) container.innerHTML = `<div class="alert alert-err">${attrEsc(err.message)}</div>`;
   }
