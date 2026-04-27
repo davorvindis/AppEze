@@ -771,8 +771,44 @@ function servirInfoProductoHTML(sku) {
   const disponible= stock ? Number(stock.Disponible || 0) : 0;
   const minimo    = stock ? Number(stock.Minimo || 0) : 0;
   const alerta    = stock && stock.Alerta === 'BAJO STOCK';
-  const foto      = p.Foto_URL || '';
   const unidad    = p.Unidad || '';
+
+  // Foto: normalizar URLs viejas de Drive (uc?export=view) que ahora dan 403
+  // al formato /thumbnail que sigue funcionando para hotlinking.
+  let foto = p.Foto_URL || '';
+  if (foto && /drive\.google\.com\/uc\b/.test(foto)) {
+    const m = String(foto).match(/[?&]id=([A-Za-z0-9_-]+)/);
+    if (m) foto = 'https://drive.google.com/thumbnail?id=' + m[1] + '&sz=w1000';
+  }
+
+  // Equivalente en pallets/cajas: si el producto tiene Unidad_Pack y Cantidad_Por_Pack,
+  // mostramos cuantos packs son las unidades disponibles.
+  const unidadPack = (p.Unidad_Pack || '').toString().trim();
+  const cantPorPack = Number(p.Cantidad_Por_Pack || 0);
+  let packInfo = '';
+  if (unidadPack && cantPorPack > 0 && disponible > 0) {
+    const nPacks = Math.floor(disponible / cantPorPack);
+    const resto  = disponible - (nPacks * cantPorPack);
+    if (nPacks > 0) {
+      // Plural en castellano: caja→cajas, bolsa→bolsas, pallet→pallets (loanword + s),
+      // bidón→bidones. Default es +s (cubre vocales y loanwords); -es solo para
+      // palabras nativas que terminan en n/r/d/l/z.
+      let plural;
+      if (nPacks === 1 || unidadPack.endsWith('s')) {
+        plural = unidadPack;
+      } else if (/ón$/i.test(unidadPack)) {
+        // bidón → bidones (cae la tilde al pluralizar)
+        plural = unidadPack.replace(/ón$/i, 'ones');
+      } else if (/[nrdlz]$/i.test(unidadPack) && !/^(pallet|pack|kit)$/i.test(unidadPack)) {
+        plural = unidadPack + 'es';
+      } else {
+        plural = unidadPack + 's';
+      }
+      packInfo = '📦 ' + nPacks + ' ' + plural;
+      if (resto > 0) packInfo += ' + ' + resto + ' ' + unidad;
+      packInfo += ' <span style="color:#9CA3AF;font-weight:500">· 1 ' + unidadPack + ' = ' + cantPorPack + ' ' + unidad + '</span>';
+    }
+  }
 
   // Chip de sub/categoria
   const chipText = (p.Subcategoria || p.Categoria || '').trim();
@@ -785,76 +821,85 @@ function servirInfoProductoHTML(sku) {
 <title>${p.Nombre} · ${p.SKU}</title>
 <style>
   /* Mobile-first: todo dimensionado para que se lea sin zoom en un celu.
-     Base font 17px (estandar iOS para evitar que Safari haga auto-zoom en inputs). */
+     Subimos un toque las medidas porque cuando se abre desde Apps Script
+     el wrapper hace que el contenido se vea "lejos" si todo era 17px. */
   * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   html, body { margin:0; padding:0; }
   body {
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
     background:#F4F6F9; color:#1F2937;
-    font-size:17px; line-height:1.45;
+    font-size:19px; line-height:1.45;
     padding-bottom:env(safe-area-inset-bottom);
+    -webkit-text-size-adjust:100%;
   }
   header {
     background:#143757; color:#fff;
-    padding:18px 20px calc(18px + env(safe-area-inset-top)) 20px;
-    padding-top:calc(18px + env(safe-area-inset-top));
-    text-align:center; font-size:17px; font-weight:600; letter-spacing:.02em;
+    padding:20px 20px calc(20px + env(safe-area-inset-top)) 20px;
+    padding-top:calc(20px + env(safe-area-inset-top));
+    text-align:center; font-size:19px; font-weight:600; letter-spacing:.02em;
   }
-  .wrap { max-width:560px; margin:0 auto; padding:14px; }
+  .wrap { max-width:480px; margin:0 auto; padding:14px; }
   .card {
-    background:#fff; border-radius:14px; padding:18px;
-    margin-bottom:12px; box-shadow:0 2px 8px rgba(0,0,0,.06);
+    background:#fff; border-radius:14px; padding:20px;
+    margin-bottom:14px; box-shadow:0 2px 8px rgba(0,0,0,.06);
   }
-  h1 { margin:0 0 6px; font-size:26px; line-height:1.2; color:#143757; font-weight:800; }
+  h1 { margin:0 0 8px; font-size:30px; line-height:1.2; color:#143757; font-weight:800; }
   .sku {
     display:inline-block; font-family:"SF Mono",Menlo,Consolas,monospace;
-    font-size:15px; color:#374151; background:#F3F4F6;
-    padding:4px 10px; border-radius:6px; margin-right:6px;
+    font-size:17px; color:#374151; background:#F3F4F6;
+    padding:5px 12px; border-radius:6px; margin-right:6px;
   }
   .chip {
-    display:inline-block; font-size:13px; color:#4B5563;
-    background:#E5E7EB; padding:4px 10px; border-radius:6px;
+    display:inline-block; font-size:14px; color:#4B5563;
+    background:#E5E7EB; padding:5px 12px; border-radius:6px;
     font-weight:600; text-transform:uppercase; letter-spacing:.03em;
   }
-  .sub-line { margin-top:6px; }
+  .sub-line { margin-top:8px; }
   img.foto {
-    width:100%; max-height:320px; object-fit:cover;
-    border-radius:12px; display:block; margin-top:14px;
+    width:100%; max-height:360px; object-fit:cover;
+    border-radius:12px; display:block; margin-top:16px;
     background:#E3E7ED;
   }
   .big {
-    font-size:72px; font-weight:800; color:#143757;
+    font-size:88px; font-weight:800; color:#143757;
     text-align:center; margin:4px 0 0; line-height:1;
     letter-spacing:-.02em;
   }
-  .big-unit { font-size:22px; color:#6B7280; text-align:center; margin-top:6px; font-weight:500; }
-  .big-label { text-align:center; color:#9CA3AF; font-size:13px; margin-top:2px; text-transform:uppercase; letter-spacing:.08em; font-weight:600; }
+  .big-unit { font-size:24px; color:#6B7280; text-align:center; margin-top:8px; font-weight:500; }
+  .big-label { text-align:center; color:#9CA3AF; font-size:14px; margin-top:2px; text-transform:uppercase; letter-spacing:.08em; font-weight:600; }
+  .pack-line {
+    margin-top:14px; padding:12px 14px; border-radius:10px;
+    background:#FEF3C7; color:#78350F; text-align:center;
+    font-size:18px; font-weight:700;
+  }
   .status {
-    margin-top:14px; padding:12px 16px; border-radius:10px;
-    font-weight:700; text-align:center; font-size:16px;
+    margin-top:14px; padding:14px 16px; border-radius:10px;
+    font-weight:700; text-align:center; font-size:18px;
   }
   .status.warn { background:#FEE2E2; color:#991B1B; }
   .status.ok   { background:#D1FAE5; color:#065F46; }
   .status.nil  { background:#F3F4F6; color:#6B7280; }
   .card-title {
-    font-weight:700; color:#374151; font-size:15px;
+    font-weight:700; color:#374151; font-size:16px;
     text-transform:uppercase; letter-spacing:.06em;
-    margin-bottom:10px;
+    margin-bottom:12px;
   }
-  table { width:100%; border-collapse:collapse; font-size:17px; }
-  td { padding:14px 4px; border-bottom:1px solid #E5E7EB; }
+  table { width:100%; border-collapse:collapse; font-size:19px; }
+  td { padding:15px 4px; border-bottom:1px solid #E5E7EB; }
   tr:last-child td { border-bottom:none; }
   .num { text-align:right; font-weight:700; font-family:"SF Mono",Menlo,monospace; }
-  .totals td { padding:12px 4px; font-size:16px; }
+  .totals td { padding:13px 4px; font-size:18px; }
   .totals td:first-child { color:#6B7280; }
-  .totals tr.highlight td { color:#143757; font-weight:700; font-size:17px; }
+  .totals tr.highlight td { color:#143757; font-weight:700; font-size:19px; }
   footer {
-    text-align:center; color:#9CA3AF; font-size:13px;
-    padding:16px 20px calc(16px + env(safe-area-inset-bottom));
+    text-align:center; color:#9CA3AF; font-size:14px;
+    padding:18px 20px calc(18px + env(safe-area-inset-bottom));
   }
   @media (max-width:360px) {
-    .big { font-size:60px; }
-    h1 { font-size:22px; }
+    body { font-size:18px; }
+    .big { font-size:72px; }
+    h1 { font-size:26px; }
+    .pack-line { font-size:16px; }
   }
 </style></head>
 <body>
@@ -871,6 +916,7 @@ function servirInfoProductoHTML(sku) {
     <div class="big-label">Disponible</div>
     <div class="big">${disponible}</div>
     <div class="big-unit">${unidad}</div>
+    ${packInfo ? `<div class="pack-line">${packInfo}</div>` : ''}
     ${alerta
       ? '<div class="status warn">⚠️ Bajo stock mínimo</div>'
       : (total > 0
