@@ -1477,7 +1477,9 @@ function onSkuChangeMov(tipo) {
   const lbl = document.getElementById('f-cant-label');
   if (lbl) lbl.textContent = `Cantidad (${prod.Unidad || ''})`;
 
-  if (tipo === 'Ingreso' && prod.Unidad_Pack && Number(prod.Cantidad_Por_Pack) > 0) {
+  // Toggle "por pallet/caja/etc" para Ingreso y Traslado.
+  // (Egreso usa la pantalla masiva con basket; ahi el toggle es por linea.)
+  if ((tipo === 'Ingreso' || tipo === 'Traslado') && prod.Unidad_Pack && Number(prod.Cantidad_Por_Pack) > 0) {
     if (packRow) {
       packRow.style.display = 'flex';
       document.getElementById('pack-label').textContent =
@@ -1544,7 +1546,8 @@ function actualizarPackIngreso() {
   const cant = parseFloat(document.getElementById('f-cant').value || '0');
   if (chk && chk.checked && prod && Number(prod.Cantidad_Por_Pack) > 0 && cant > 0) {
     const total = cant * Number(prod.Cantidad_Por_Pack);
-    r.innerHTML = `<span style="color:var(--accent);font-weight:600">→ Se van a ingresar <strong>${total}</strong> ${prod.Unidad || ''} (${cant} × ${prod.Cantidad_Por_Pack})</span>`;
+    // Texto genérico que funciona para Ingreso y Traslado.
+    r.innerHTML = `<span style="color:var(--accent);font-weight:600">→ Se van a registrar <strong>${total}</strong> ${prod.Unidad || ''} (${cant} ${prod.Unidad_Pack || 'pack'}${cant === 1 ? '' : 's'} × ${prod.Cantidad_Por_Pack})</span>`;
   } else {
     r.innerHTML = '';
   }
@@ -1562,7 +1565,15 @@ function validarCantMov(tipo) {
   const zo = document.getElementById('f-origen') ? document.getElementById('f-origen').value : '';
   if (!sku || !zo) return;
 
-  const cant = parseFloat(document.getElementById('f-cant').value || '0');
+  let cant = parseFloat(document.getElementById('f-cant').value || '0');
+  // Si el toggle de "por pallet" está activo, la cantidad ingresada es en
+  // packs pero el stock disponible esta en unidades base. Multiplico antes
+  // de comparar para que la validacion funcione correcto en Traslado.
+  const prod = STATE.productos.find(p => p.SKU === sku);
+  const chk = document.getElementById('f-usar-pack');
+  if (chk && chk.checked && prod && Number(prod.Cantidad_Por_Pack) > 0) {
+    cant = cant * Number(prod.Cantidad_Por_Pack);
+  }
 
   if (tipo === 'Libera_Reserva') {
     const obra = document.getElementById('f-obra') ? document.getElementById('f-obra').value : '';
@@ -1664,12 +1675,12 @@ function openEgresoMasivo(skuPreseleccionado) {
     if (prod) {
       const zonas = getZonasConStock(skuPreseleccionado);
       if (zonas.length > 0) {
-        STATE.egresoBasket.push({ sku: skuPreseleccionado, zona: zonas[0].Codigo, cantidad: '' });
+        STATE.egresoBasket.push({ sku: skuPreseleccionado, zona: zonas[0].Codigo, cantidad: '', usePack: false });
       }
     }
   }
   if (STATE.egresoBasket.length === 0) {
-    STATE.egresoBasket.push({ sku: '', zona: '', cantidad: '' });
+    STATE.egresoBasket.push({ sku: '', zona: '', cantidad: '', usePack: false });
   }
 
   const obraOptions = buildObraOptions({ onlyActive: true });
@@ -1697,7 +1708,7 @@ function openEgresoMasivo(skuPreseleccionado) {
   renderEgresoBasket();
 }
 
-function egregarLinea() { STATE.egresoBasket.push({ sku: '', zona: '', cantidad: '' }); renderEgresoBasket(); }
+function egregarLinea() { STATE.egresoBasket.push({ sku: '', zona: '', cantidad: '', usePack: false }); renderEgresoBasket(); }
 function egQuitarLinea(idx) {
   STATE.egresoBasket.splice(idx, 1);
   if (STATE.egresoBasket.length === 0) egregarLinea();
@@ -1710,10 +1721,16 @@ function onEgSkuChange(idx, value) {
   if (!zonas.find(z => z.Codigo === actual)) {
     STATE.egresoBasket[idx].zona = zonas.length > 0 ? zonas[0].Codigo : '';
   }
+  // Si el nuevo producto no tiene pack, apagar el toggle
+  const prod = STATE.productos.find(p => p.SKU === value);
+  if (!prod || !prod.Unidad_Pack || !(Number(prod.Cantidad_Por_Pack) > 0)) {
+    STATE.egresoBasket[idx].usePack = false;
+  }
   renderEgresoBasket();
 }
 function onEgZonaChange(idx, value) { STATE.egresoBasket[idx].zona = value; renderEgresoBasket(); }
 function onEgCantChange(idx, value) { STATE.egresoBasket[idx].cantidad = value; validarEgresoBasket(); }
+function onEgPackToggle(idx, checked) { STATE.egresoBasket[idx].usePack = !!checked; renderEgresoBasket(); }
 
 function renderEgresoBasket() {
   const c = document.getElementById('eg-basket');
@@ -1735,7 +1752,18 @@ function renderEgresoBasket() {
 
     const dispLinea = line.sku && line.zona ? getStockEnZona(line.sku, line.zona) : 0;
     const cantNum = parseFloat(line.cantidad || '0');
-    const excede = cantNum > 0 && cantNum > dispLinea;
+    const tienePack = !!(prod && prod.Unidad_Pack && Number(prod.Cantidad_Por_Pack) > 0);
+    const cantBase = (line.usePack && tienePack) ? cantNum * Number(prod.Cantidad_Por_Pack) : cantNum;
+    const excede = cantNum > 0 && cantBase > dispLinea;
+
+    // Bloque del toggle "por pallet/caja/etc." para egresos
+    const packBlock = tienePack ? `
+      <div class="toggle-row" style="margin:4px 0 6px;">
+        <input type="checkbox" id="eg-pack-${idx}" ${line.usePack ? 'checked' : ''} onchange="onEgPackToggle(${idx}, this.checked)">
+        <label for="eg-pack-${idx}">Egresar por ${attrEsc(prod.Unidad_Pack)} (1 ${attrEsc(prod.Unidad_Pack)} = ${attrEsc(String(prod.Cantidad_Por_Pack))} ${attrEsc(prod.Unidad || '')})</label>
+      </div>
+      ${line.usePack && cantNum > 0 ? `<div class="hint" style="color:var(--accent);font-weight:600;margin:-2px 0 6px;">→ Se van a egresar <strong>${cantBase}</strong> ${attrEsc(prod.Unidad || '')} (${cantNum} ${attrEsc(prod.Unidad_Pack)}${cantNum === 1 ? '' : 's'} × ${attrEsc(String(prod.Cantidad_Por_Pack))})</div>` : ''}
+    ` : '';
 
     return `
       <div class="basket-line">
@@ -1749,6 +1777,7 @@ function renderEgresoBasket() {
           </select>
         </div>
         ${line.sku ? `
+          ${packBlock}
           <div class="field-row">
             <div class="field">
               <label>Zona origen</label>
@@ -1757,7 +1786,7 @@ function renderEgresoBasket() {
               </select>
             </div>
             <div class="field">
-              <label>Cantidad${prod ? ' (' + attrEsc(prod.Unidad || '') + ')' : ''}</label>
+              <label>Cantidad${prod ? ' (' + (line.usePack && tienePack ? attrEsc(prod.Unidad_Pack) + 's' : attrEsc(prod.Unidad || '')) + ')' : ''}</label>
               <input type="number" step="0.01" inputmode="decimal" value="${attrEsc(line.cantidad)}" oninput="onEgCantChange(${idx}, this.value)">
             </div>
           </div>
@@ -1776,8 +1805,13 @@ function validarEgresoBasket() {
   let anyLineOk = false, anyBad = false;
   const acc = {};
   for (const l of STATE.egresoBasket) {
-    const cant = parseFloat(l.cantidad || '0');
+    let cant = parseFloat(l.cantidad || '0');
     if (!l.sku || !l.zona || !(cant > 0)) continue;
+    // Si la línea está marcada "por pack", convertir a unidades base para validar contra stock.
+    const prod = STATE.productos.find(p => p.SKU === l.sku);
+    if (l.usePack && prod && Number(prod.Cantidad_Por_Pack) > 0) {
+      cant = cant * Number(prod.Cantidad_Por_Pack);
+    }
     const key = l.sku + '||' + l.zona;
     acc[key] = (acc[key] || 0) + cant;
     anyLineOk = true;
@@ -1809,8 +1843,14 @@ async function submitEgresoMasivo() {
   const emitted = [];
   let okCount = 0, errs = [];
   for (const l of lineas) {
+    let cantidad = parseFloat(l.cantidad);
+    // Si la línea está marcada "por pack", convertir a unidades base antes de mandar al backend.
+    const prod = STATE.productos.find(p => p.SKU === l.sku);
+    if (l.usePack && prod && Number(prod.Cantidad_Por_Pack) > 0) {
+      cantidad = cantidad * Number(prod.Cantidad_Por_Pack);
+    }
     const payload = {
-      tipo: 'Egreso', sku: l.sku, cantidad: parseFloat(l.cantidad),
+      tipo: 'Egreso', sku: l.sku, cantidad,
       zonaOrigen: l.zona, obra,
       usuario: SESSION ? SESSION.user : '',
       notas,
