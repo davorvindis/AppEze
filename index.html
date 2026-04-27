@@ -167,6 +167,9 @@
   .totals { display:flex; flex-direction:column; align-items:flex-end; gap:2px; flex-shrink:0; }
   .total-big { font-size:clamp(18px, 5.5vw, 24px); font-weight:700; color:var(--primary); line-height:1; }
   .unit { font-size:11px; color:var(--muted); white-space:nowrap; }
+  /* Conversion a pallets/cajas (bajo "u. disp.") */
+  .pack-conv { font-size:11px; font-weight:600; color:var(--primary); white-space:nowrap; margin-top:2px; background:#EEF2F7; padding:2px 7px; border-radius:8px; line-height:1.3; }
+  .pack-eq   { font-size:10px; color:var(--muted); white-space:nowrap; margin-top:1px; }
   .badge-warn { background:var(--warn); color:#fff; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600; }
   /* Fondo que "apaga" los cards que pasan por debajo del FAB (no intercepta clicks) */
   .fab-scrim {
@@ -596,6 +599,44 @@ function customDialog({ title, message, buttons, dismissable = true }) {
     // Focus al primer boton para que Enter lo dispare
     setTimeout(() => { const b = btnsWrap.querySelector('button'); if (b) b.focus(); }, 20);
   });
+}
+
+// Devuelve dos lineas HTML para mostrar bajo "X u. disp." en los cards
+// de stock cuando el producto viene por pallet/caja/etc.:
+//   📦 13 pallets         (conversion del disponible al packaging)
+//   1 pallet = 60 u.      (equivalencia, mas chiquito)
+// Si hay sobrante, muestra "13 pallets + 30 u.". Si el disponible es 0
+// o el producto no tiene packaging configurado, no devuelve nada.
+function packBadge(disponible, prod) {
+  const cpack = Number(prod.Cantidad_Por_Pack || 0);
+  const upack = (prod.Unidad_Pack || '').trim();
+  const unidad = (prod.Unidad || '').trim();
+  if (!cpack || !upack) return '';
+  const total = Number(disponible || 0);
+  if (total <= 0) return ''; // sin stock, sin conversion
+
+  // Pluralizacion simple (es): pallet→pallets, caja→cajas, bulto→bultos.
+  // Si la palabra termina en 's' la dejamos como esta. Si termina en vocal
+  // sumamos 's', si termina en consonante sumamos 'es' (rollo→rollos seria
+  // edge case, pero en castellano todas las opciones del select terminan
+  // en vocal asi que con +'s' alcanza).
+  const plural = (n, w) => (n === 1 || w.endsWith('s')) ? w : (w + 's');
+
+  const full = Math.floor(total / cpack);
+  const resto = Math.round((total - full * cpack) * 100) / 100; // limpia floats
+  let conv;
+  if (full === 0) {
+    // Menos de 1 pack: no aporta info util, mejor no mostrar conversion
+    return `<div class="pack-eq">1 ${attrEsc(upack)} = ${cpack} ${attrEsc(unidad)}</div>`;
+  } else if (resto === 0) {
+    conv = `${full} ${plural(full, upack)}`;
+  } else {
+    conv = `${full} ${plural(full, upack)} + ${resto} ${attrEsc(unidad)}`;
+  }
+  return `
+    <div class="pack-conv" title="1 ${attrEsc(upack)} = ${cpack} ${attrEsc(unidad)}">📦 ${conv}</div>
+    <div class="pack-eq">1 ${attrEsc(upack)} = ${cpack} ${attrEsc(unidad)}</div>
+  `;
 }
 
 // Convierte URLs viejas de Drive (formato uc?export=view&id=X, que Google
@@ -1246,6 +1287,7 @@ function renderStock() {
         <div class="totals">
           <div class="total-big">${Number(r.Disponible || 0)}</div>
           <div class="unit">${attrEsc(r.Unidad || '')} disp.</div>
+          ${packBadge(r.Disponible, prod)}
           ${Number(r.Reservado || 0) > 0 ? `<div class="unit" style="color:var(--purple)">Res: ${r.Reservado}</div>` : ''}
         </div>
       </div>`;
