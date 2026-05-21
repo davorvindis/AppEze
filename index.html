@@ -33,7 +33,13 @@
     --border: #E3E7ED;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  html, body { margin:0; padding:0; background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; font-size:16px; overscroll-behavior-y:contain; -webkit-text-size-adjust:100%; text-size-adjust:100%; overflow-x:hidden; overscroll-behavior-x:none; width:100%; }
+  /* IMPORTANTE: overflow-x:hidden va SOLO en <html>. En iOS/Safari (sobre todo
+     en modo PWA standalone), poner overflow-x:hidden en <body> convierte al body
+     en contenedor de scroll y rompe el scroll vertical natural cuando hay sticky
+     header + FAB fixed. Por eso lo dejamos en html y el body queda con scroll
+     vertical nativo del viewport. */
+  html { overflow-x:hidden; overscroll-behavior-x:none; width:100%; }
+  body { margin:0; padding:0; background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; font-size:16px; overscroll-behavior-y:contain; -webkit-text-size-adjust:100%; text-size-adjust:100%; width:100%; min-height:100vh; }
   /* Evita que cualquier elemento empuje el viewport horizontalmente */
   img, video, canvas, svg { max-width:100%; }
 
@@ -1037,6 +1043,21 @@ async function enterApp() {
   // pintar chip de usuario
   document.getElementById('hdr-avatar').textContent = initialsOf(SESSION.nombre);
   document.getElementById('hdr-nombre').textContent = SESSION.nombre;
+  // Confirmación antes de cerrar/recargar la app: evita salir por accidente.
+  // beforeunload muestra el diálogo nativo del navegador ("¿Salir del sitio?").
+  // El mensaje custom lo ignoran los navegadores modernos por seguridad, pero
+  // igual mostramos el prompt. _skipUnloadConfirm permite saltearlo cuando es
+  // el propio usuario el que dispara el logout desde el botón de la app.
+  if (!window._exitConfirmInstalled) {
+    window.addEventListener('beforeunload', (e) => {
+      if (!SESSION || window._skipUnloadConfirm) return;
+      e.preventDefault();
+      // Chrome/Edge requieren setear returnValue; el texto se ignora.
+      e.returnValue = '¿Salir de la app? Vas a perder lo que estés cargando.';
+      return e.returnValue;
+    });
+    window._exitConfirmInstalled = true;
+  }
   await init();
 }
 
@@ -1347,6 +1368,9 @@ function showDetalle(sku) {
       <button class="btn btn-accent" onclick='openSubirFoto(${jsStr(sku)})'>${prod.Foto_URL ? '📷 Cambiar foto' : '📷 Foto'}</button>
       <button class="btn btn-purple" onclick='generarEtiquetaProducto(${jsStr(sku)})'>🏷️ Etiqueta</button>
     </div>
+    <div class="btn-row" style="margin-top:8px;">
+      <button class="btn btn-warn" onclick='confirmEliminarProducto(${jsStr(sku)})'>🗑 Eliminar producto</button>
+    </div>
     ${prod.QR_URL ? `
       <div class="alert alert-ok" style="margin-top:8px;">QR ya generado ✓</div>
       <img src="${attrEsc(prod.QR_URL)}" class="qr-preview" alt="QR ${attrEsc(sku)}" onerror="this.style.display='none'">
@@ -1359,6 +1383,50 @@ function showDetalle(sku) {
       <button class="btn btn-secondary" onclick="closeModal()">Cerrar</button>
     </div>
   `);
+}
+
+// ============== ELIMINAR PRODUCTO ==============
+// Soft-delete vía backend (marca Activo='No' en la fila del Sheet).
+// La historia de movimientos NO se borra — sólo deja de aparecer el producto.
+// Si tiene stock vigente, le avisamos al usuario pero igual permitimos borrar.
+async function confirmEliminarProducto(sku) {
+  const prod = STATE.productos.find(p => p.SKU === sku);
+  if (!prod) { toast('Producto no encontrado', 'err'); return; }
+  const stockR = getStockRow(sku) || {};
+  const disp = Number(stockR.Disponible || 0);
+  const reserv = Number(stockR.Reservado || 0);
+  const totalFis = Number(stockR.Total_Fisico || 0);
+
+  // Mensaje con advertencia si hay stock o reservas
+  let warn = '';
+  if (totalFis > 0 || reserv > 0) {
+    warn = `<div class="alert alert-err" style="margin-bottom:10px;">
+      ⚠ Este producto todavía tiene <strong>${totalFis} ${attrEsc(prod.Unidad || '')}</strong> en depósito
+      ${reserv > 0 ? `(de los cuales <strong>${reserv}</strong> están reservados)` : ''}.
+      Si lo eliminás, el stock deja de aparecer pero la historia de movimientos se conserva.
+    </div>`;
+  }
+
+  const choice = await customDialog({
+    title: '¿Eliminar producto?',
+    message: `${warn}Vas a eliminar <strong>${attrEsc(prod.Nombre)}</strong> (${attrEsc(sku)}).<br><br>
+      No se borra del Sheet — se marca como inactivo. La historia de movimientos queda intacta.
+      El SKU queda reservado (no se puede reusar).`,
+    buttons: [
+      { key: 'del',    label: '🗑 Sí, eliminar',  kind: 'warn'      },
+      { key: 'cancel', label: 'Cancelar',         kind: 'secondary' },
+    ],
+  });
+  if (choice !== 'del') return;
+
+  try {
+    await api('eliminarProducto', { sku });
+    toast('Producto eliminado ✓', 'ok');
+    closeModal();
+    await init();
+  } catch (err) {
+    toast('Error al eliminar: ' + (err.message || err), 'err');
+  }
 }
 
 // ============== MOVIMIENTOS ==============
@@ -2507,10 +2575,18 @@ function openNuevoProducto() {
     <div style="border-top:1px dashed var(--border);margin:14px 0 10px;padding-top:10px;">
       <div style="font-weight:700;color:var(--primary);margin-bottom:6px;">📦 Stock inicial (opcional)</div>
       <div class="hint" style="margin-bottom:6px;">Si ya tenés este producto en el galpón, cargalo acá y queda registrado como ingreso. Si no, dejalo en 0.</div>
+      <!-- Toggle "por pack" para stock inicial. Sólo se muestra si arriba se
+           marcó "Viene por pack / pallet / caja". Se renderiza/oculta desde
+           togglePackCampos() + onStockIniPackToggle(). -->
+      <div class="toggle-row" id="p-stock-pack-row" style="display:none;">
+        <input type="checkbox" id="p-stock-use-pack" onchange="onStockIniPackToggle()">
+        <label for="p-stock-use-pack" id="p-stock-pack-label">Cargar por pack</label>
+      </div>
+      <div id="p-stock-pack-preview" class="hint" style="color:var(--accent);font-weight:600;margin:-2px 0 6px;min-height:0;"></div>
       <div class="field-row">
         <div class="field">
-          <label>Cantidad</label>
-          <input id="p-stock" type="number" step="0.01" value="0">
+          <label><span id="p-stock-label">Cantidad</span></label>
+          <input id="p-stock" type="number" step="0.01" value="0" oninput="onStockIniPackToggle()">
         </div>
         <div class="field">
           <label>Depósito</label>
@@ -2531,6 +2607,51 @@ function openNuevoProducto() {
 function togglePackCampos() {
   const on = document.getElementById('p-use-pack').checked;
   document.getElementById('pack-fields').style.display = on ? '' : 'none';
+  // Mostrar/ocultar también el toggle "Cargar por pack" del stock inicial:
+  // si el producto NO viene por pack, no tiene sentido ofrecerlo.
+  const row = document.getElementById('p-stock-pack-row');
+  const usePackChk = document.getElementById('p-stock-use-pack');
+  if (row) row.style.display = on ? '' : 'none';
+  if (!on && usePackChk) {
+    usePackChk.checked = false;
+    onStockIniPackToggle(); // limpia label y preview
+  } else {
+    onStockIniPackToggle(); // refresca etiqueta del pack
+  }
+}
+
+// Stock inicial × pack: si el usuario indica "Cargar por pack", la cantidad
+// que escribe son packs (ej: 3 pallets) y se multiplica por Cantidad_Por_Pack
+// al hacer el ingreso. Esta función ajusta la etiqueta y muestra la conversión
+// en tiempo real para que el usuario sepa cuántas unidades base va a guardar.
+function onStockIniPackToggle() {
+  const usePackChk   = document.getElementById('p-stock-use-pack');
+  const usePack      = !!(usePackChk && usePackChk.checked);
+  const labelSpan    = document.getElementById('p-stock-label');
+  const packLabel    = document.getElementById('p-stock-pack-label');
+  const previewDiv   = document.getElementById('p-stock-pack-preview');
+  const unidad       = (document.getElementById('p-unidad') || {}).value || 'u.';
+  const unidadPack   = (document.getElementById('p-upack')  || {}).value || 'pack';
+  const cantPorPack  = parseFloat((document.getElementById('p-cpack') || {}).value || '0');
+  const cantInput    = parseFloat((document.getElementById('p-stock')  || {}).value || '0');
+  // Actualizo etiqueta del checkbox: "Cargar por pallet (1 pallet = 60 u.)"
+  if (packLabel) {
+    const conv = cantPorPack > 0 ? ' (1 ' + attrEsc(unidadPack) + ' = ' + cantPorPack + ' ' + attrEsc(unidad) + ')' : '';
+    packLabel.textContent = 'Cargar por ' + unidadPack + conv;
+  }
+  // Etiqueta del input de cantidad
+  if (labelSpan) {
+    labelSpan.textContent = usePack ? 'Cantidad (en ' + unidadPack + ')' : 'Cantidad';
+  }
+  // Preview de la conversión
+  if (previewDiv) {
+    if (usePack && cantInput > 0 && cantPorPack > 0) {
+      const total = cantInput * cantPorPack;
+      previewDiv.textContent = '→ Se van a ingresar ' + total + ' ' + unidad + ' (' + cantInput + ' ' + unidadPack + (cantInput === 1 ? '' : 's') + ' × ' + cantPorPack + ')';
+    } else {
+      previewDiv.textContent = '';
+    }
+  }
 }
 
 function updateSubcategorias() {
@@ -2615,15 +2736,32 @@ async function submitProducto() {
 
     // Stock inicial: si se cargó cantidad+zona, hacer el ingreso automáticamente.
     // Si el usuario eligió "Continuar sin agregar stock" arriba, saltamos el ingreso.
-    const stockIni = parseFloat(document.getElementById('p-stock').value || '0');
+    // Si el toggle "Cargar por pack" está activo, la cantidad ingresada está en
+    // unidades de pack y hay que multiplicarla por Cantidad_Por_Pack antes de
+    // mandarla al backend (que siempre trabaja en unidades base).
+    let stockIni = parseFloat(document.getElementById('p-stock').value || '0');
+    const stockUsePack = !!(document.getElementById('p-stock-use-pack') && document.getElementById('p-stock-use-pack').checked);
+    const cantPorPack  = parseFloat((document.getElementById('p-cpack') || {}).value || '0');
+    const unidadPack   = (document.getElementById('p-upack') || {}).value || '';
+    const unidadStock  = document.getElementById('p-unidad').value || '';
+    let stockEnviado = stockIni;
+    if (stockUsePack && usePack && cantPorPack > 0) {
+      stockEnviado = stockIni * cantPorPack;
+    }
     const zonaIni  = document.getElementById('p-stock-zona').value;
     let msg = `Producto creado ✓ SKU: <strong>${attrEsc(sku)}</strong>`;
-    if (!skipStockInicial && stockIni > 0 && zonaIni) {
+    if (!skipStockInicial && stockEnviado > 0 && zonaIni) {
+      const notas = stockUsePack && usePack && cantPorPack > 0
+        ? `Stock inicial (alta de producto) — ${stockIni} ${unidadPack}${stockIni === 1 ? '' : 's'} × ${cantPorPack} = ${stockEnviado} ${unidadStock}`
+        : 'Stock inicial (alta de producto)';
       await api('addMovimiento', {
-        tipo: 'Ingreso', sku, cantidad: stockIni, zonaDestino: zonaIni,
-        usuario: SESSION ? SESSION.user : '', notas: 'Stock inicial (alta de producto)',
+        tipo: 'Ingreso', sku, cantidad: stockEnviado, zonaDestino: zonaIni,
+        usuario: SESSION ? SESSION.user : '', notas,
       });
-      msg += `<br>+ ingreso inicial de <strong>${stockIni}</strong> en <strong>${attrEsc(zonaIni)}</strong> ✓`;
+      const detalle = stockUsePack && usePack && cantPorPack > 0
+        ? `<strong>${stockEnviado}</strong> ${attrEsc(unidadStock)} (${stockIni} ${attrEsc(unidadPack)}${stockIni === 1 ? '' : 's'} × ${cantPorPack})`
+        : `<strong>${stockEnviado}</strong>`;
+      msg += `<br>+ ingreso inicial de ${detalle} en <strong>${attrEsc(zonaIni)}</strong> ✓`;
     }
     document.getElementById('prod-msg').innerHTML = `<div class="alert alert-ok">${msg}</div>`;
     await init();

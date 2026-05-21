@@ -88,6 +88,7 @@ function handle(e) {
       case 'getAlertas':         result = getAlertas(); break;
       case 'addMovimiento':      result = addMovimiento(params); break;
       case 'addProducto':        result = addProducto(params); break;
+      case 'eliminarProducto':   result = eliminarProducto(params); break;
       case 'addObra':            result = addObra(params); break;
       case 'addZona':            result = addZona(params); break;
       case 'uploadFoto':         result = uploadFoto(params); break;
@@ -390,6 +391,34 @@ function addProducto(params) {
   s.appendRow([sku, nombre, categoria, subcategoria, unidad, fotoUrl, stockMinimo, notas, 'Sí', unidadPack, cantidadPack, '']);
   SpreadsheetApp.flush();
   return { sku };
+}
+
+// ============== ELIMINAR PRODUCTO ==============
+// Soft-delete: marcamos la columna I (Activo) como 'No'. NO borramos la fila,
+// y tampoco tocamos Movimientos (la historia se conserva intacta — los
+// movimientos viejos con ese SKU siguen existiendo, lo que respeta el principio
+// de "el stock no se guarda, se calcula desde el log").
+// getProducts() ya filtra por Activo !== 'No', así que el producto deja de
+// aparecer en la app pero el SKU queda reservado (no se puede reusar).
+function eliminarProducto(params) {
+  const sku = (params.sku || '').trim();
+  if (!sku) throw new Error('Falta SKU');
+
+  const s = sheet(SHEET_PRODUCTOS);
+  const last = s.getLastRow();
+  if (last < 2) throw new Error('Producto no encontrado: ' + sku);
+
+  // Buscar el SKU en columna A
+  const skus = s.getRange(2, 1, last - 1, 1).getValues().flat();
+  const idx = skus.findIndex(x => String(x) === sku);
+  if (idx === -1) throw new Error('Producto no encontrado: ' + sku);
+
+  const fila = idx + 2; // +1 por header, +1 porque getRange es 1-indexed
+  // Columna I = Activo (índice 9). Si la columna no existe todavía, agrandamos.
+  const colActivo = 9;
+  s.getRange(fila, colActivo).setValue('No');
+  SpreadsheetApp.flush();
+  return { sku, eliminado: true };
 }
 
 function addObra(params) {
