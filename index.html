@@ -1280,7 +1280,13 @@ function renderStock() {
   const list = document.getElementById('stock-list');
   const search = (document.getElementById('search-input').value || '').toLowerCase();
   const cat = document.getElementById('cat-filter').value;
-  let rows = STATE.stock.filter(r => r.SKU);
+  // Stock_Actual es una hoja calculada del Sheet (con fórmulas que agregan
+  // movimientos), así que si eliminamos un producto (soft-delete via Activo='No'),
+  // el SKU sigue apareciendo ahí porque sus movimientos viejos no se borran.
+  // Filtramos en el frontend: sólo mostramos filas de stock cuyo SKU figura
+  // entre los productos activos (STATE.productos ya viene filtrado del backend).
+  const skusActivos = new Set(STATE.productos.map(p => String(p.SKU)));
+  let rows = STATE.stock.filter(r => r.SKU && skusActivos.has(String(r.SKU)));
   if (STATE.currentZone === 'ALERTAS') rows = rows.filter(r => r.Alerta === 'BAJO STOCK');
   if (search) rows = rows.filter(r =>
     (r.Nombre || '').toString().toLowerCase().includes(search) ||
@@ -1391,7 +1397,7 @@ function showDetalle(sku) {
 // Si tiene stock vigente, le avisamos al usuario pero igual permitimos borrar.
 async function confirmEliminarProducto(sku) {
   const prod = STATE.productos.find(p => p.SKU === sku);
-  if (!prod) { toast('Producto no encontrado', 'err'); return; }
+  if (!prod) { toast('Producto no encontrado', { type: 'err' }); return; }
   const stockR = getStockRow(sku) || {};
   const disp = Number(stockR.Disponible || 0);
   const reserv = Number(stockR.Reservado || 0);
@@ -1421,11 +1427,11 @@ async function confirmEliminarProducto(sku) {
 
   try {
     await api('eliminarProducto', { sku });
-    toast('Producto eliminado ✓', 'ok');
+    toast('Producto eliminado ✓', { type: 'ok' });
     closeModal();
     await init();
   } catch (err) {
-    toast('Error al eliminar: ' + (err.message || err), 'err');
+    toast('Error al eliminar: ' + (err.message || err), { type: 'err' });
   }
 }
 

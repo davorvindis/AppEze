@@ -191,11 +191,21 @@ function getStock() {
   const values = s.getDataRange().getValues();
   if (values.length < 2) return [];
   const headers = values[0];
-  return values.slice(1).filter(r => r[0] !== '' && r[0] !== null).map(row => {
-    const obj = {};
-    headers.forEach((h, i) => { obj[h] = row[i]; });
-    return obj;
-  });
+  // Stock_Actual viene de fórmulas sobre Movimientos. Cuando soft-deleteamos
+  // un producto (Activo='No'), su SKU sigue apareciendo en Stock_Actual porque
+  // los movimientos viejos no se tocan. Acá lo filtramos para que esos SKUs
+  // dejen de aparecer en el endpoint (la app del front no tiene que saber
+  // de productos eliminados).
+  const prods = sheetData(SHEET_PRODUCTOS);
+  const skusActivos = new Set(prods.filter(p => p.Activo !== 'No').map(p => String(p.SKU)));
+  return values.slice(1)
+    .filter(r => r[0] !== '' && r[0] !== null)
+    .filter(r => skusActivos.has(String(r[0])))
+    .map(row => {
+      const obj = {};
+      headers.forEach((h, i) => { obj[h] = row[i]; });
+      return obj;
+    });
 }
 
 function getMovimientos(limit) {
