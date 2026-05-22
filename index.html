@@ -885,7 +885,7 @@ function showSaving(msg){_ensureSaving();const el=document.getElementById('savin
 function hideSaving(){const el=document.getElementById('saving-overlay');if(el)el.classList.remove('show');}
 
 // Actions que son de escritura (muestran overlay)
-const _WRITE_ACTIONS = ['addMovimiento','addProducto','addObra','addZona','uploadFoto','generarQR','sincronizarFotos','login'];
+const _WRITE_ACTIONS = ['addMovimiento','addProducto','addObra','addZona','uploadFoto','generarQR','sincronizarFotos','login','updateMovimientoNota'];
 
 async function api(action, extra = {}, method = 'GET') {
   const isWrite = _WRITE_ACTIONS.indexOf(action) !== -1;
@@ -1718,7 +1718,7 @@ async function submitMovimiento(tipo) {
       const motivo = payload.motivo || '(sin motivo)';
       if (!confirm(`¿Confirmás este ${signo} de ${abs}${unidad} de "${nomProd}" por "${motivo}"?`)) return;
     }
-    await api('addMovimiento', payload);
+    const res = await api('addMovimiento', payload);
 
     // Recientes: último SKU/obra/zona elegidos para el autocompletar
     pushReciente('skus', sku);
@@ -1732,6 +1732,18 @@ async function submitMovimiento(tipo) {
       type: 'ok',
       undo: () => anularMovimiento(payload),
     });
+
+    // Para Traslados ofrecemos imprimir etiqueta de envío con destino específico.
+    // (Egresos van por submitEgresoMasivo, que tiene su propia rama.)
+    if (tipo === 'Traslado' && res && res.id) {
+      setTimeout(() => openEtiquetaEnvio([{
+        id: res.id, sku, cantidad,
+        zonaDestino: payload.zonaDestino,
+        zonaOrigen: payload.zonaOrigen,
+        tipo: 'Traslado',
+      }]), 400);
+    }
+
     init();
   } catch (err) {
     haptic('err');
@@ -1930,8 +1942,8 @@ async function submitEgresoMasivo() {
       notas,
     };
     try {
-      await api('addMovimiento', payload);
-      emitted.push(payload);
+      const res = await api('addMovimiento', payload);
+      emitted.push({ ...payload, id: res && res.id });
       okCount++;
     } catch (err) {
       errs.push(`${l.sku}: ${err.message}`);
@@ -1946,6 +1958,18 @@ async function submitEgresoMasivo() {
       type: 'ok',
       undo: () => undoBatch(emitted),
     });
+
+    // Ofrecer imprimir etiquetas de envío para todos los egresos del batch.
+    // Comparten destino fino (lo cargan una sola vez) y cada línea genera su PNG.
+    const conId = emitted.filter(m => m.id);
+    if (conId.length > 0) {
+      setTimeout(() => openEtiquetaEnvio(conId.map(m => ({
+        id: m.id, sku: m.sku, cantidad: m.cantidad,
+        zonaOrigen: m.zonaOrigen, obra: m.obra,
+        tipo: 'Egreso',
+      }))), 400);
+    }
+
     init();
   } else {
     haptic('err');
@@ -3078,6 +3102,296 @@ async function generarEtiquetaProducto(sku) {
   }
 }
 
+// ============== ETIQUETA DE ENVÍO ==============
+// Etiqueta destinada a pegarse en la/s caja/s de un envío puntual (Traslado o
+// Egreso). A diferencia de la etiqueta de producto, esta lleva:
+//   - La nota de DESTINO ESPECÍFICO bien grande (ej: "BAÑOS PLANTA ALTA").
+//   - Datos del movimiento puntual (cantidad enviada, destino, fecha).
+//   - QR que apunta a infoMovimiento?id=...&destino=... → al escanear se ve
+//     un modal pop-up con la nota grande (cerrable con X) + info del envío.
+// La nota se persiste en Movimientos.Notas vía updateMovimientoNota, así
+// si re-escanean el QR más tarde igual aparece sin depender del URL.
+//
+// `movimientos` es un array de { id, sku, cantidad, zonaOrigen, zonaDestino, obra, tipo }.
+// Para un Traslado individual viene 1 elemento; para Egreso masivo, N.
+function openEtiquetaEnvio(movimientos) {
+  if (!movimientos || movimientos.length === 0) return;
+  STATE.etiquetaEnvioBatch = movimientos;
+
+  // Para mostrar nombres lindos en el preview del modal
+  const items = movimientos.map(m => {
+    const prod = STATE.productos.find(p => p.SKU === m.sku);
+    return {
+      ...m,
+      nombre: prod ? prod.Nombre : m.sku,
+      unidad: prod ? (prod.Unidad || '') : '',
+    };
+  });
+
+  const itemsHtml = items.map((it, i) => `
+    <div style="padding:8px 0;${i < items.length - 1 ? 'border-bottom:1px solid var(--border);' : ''}">
+      <strong>${attrEsc(it.nombre)}</strong>
+      <small style="color:var(--muted);display:block;">${attrEsc(it.sku)} · ${attrEsc(it.cantidad)} ${attrEsc(it.unidad)}</small>
+    </div>
+  `).join('');
+
+  const titulo = items.length === 1
+    ? '🏷️ Etiqueta de envío'
+    : `🏷️ Etiquetas de envío (${items.length})`;
+
+  openModal(`
+    <h2>${titulo}</h2>
+    <div id="env-msg"></div>
+    <div style="background:var(--bg-soft,#F4F6F9);border-radius:8px;padding:10px 14px;margin-bottom:14px;">
+      ${itemsHtml}
+    </div>
+    <div class="field">
+      <label>📍 Destino específico (opcional)</label>
+      <textarea id="env-destino" rows="2" placeholder="Ej: BAÑOS PLANTA ALTA, COCINA PB, PASILLO ESTE..." style="text-transform:uppercase;"></textarea>
+      <div class="hint">Aparece bien grande en la etiqueta y como pop-up al escanear el QR. Dejalo vacío si no hace falta.</div>
+    </div>
+    <div class="field">
+      <label>Cantidad de etiquetas por producto</label>
+      <input type="number" id="env-copias" value="1" min="1" max="20" step="1" inputmode="numeric">
+      <div class="hint">Si vas a usar 1 por bulto y mandás 5 cajas, poné 5.</div>
+    </div>
+    <div id="env-container"></div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="closeModal()">Saltar</button>
+      <button class="btn btn-purple" id="env-btn" onclick="confirmarEtiquetaEnvio()">🏷️ Generar e imprimir</button>
+    </div>
+  `);
+}
+
+// Reimprimir etiqueta de envío de un movimiento ya guardado.
+// Se llama desde el historial de obra. Trae el movimiento del backend
+// (más fresco que STATE) y abre el modal de impresión con la nota previa
+// si la había, así el usuario solo confirma copias.
+async function reimprimirEtiquetaEnvio(movId) {
+  if (!movId) return;
+  try {
+    // Traemos movimientos recientes y buscamos por ID. (No tenemos endpoint
+    // por-id; getMovimientos con un limit grande basta para casos normales.)
+    const movs = await api('getMovimientos', { limit: 500 });
+    const m = movs.find(x => String(x.ID) === String(movId));
+    if (!m) { toast('Movimiento no encontrado', { type: 'err' }); return; }
+    if (m.Tipo !== 'Egreso' && m.Tipo !== 'Traslado') {
+      toast('Solo se reimprimen Traslados y Egresos', { type: 'err' });
+      return;
+    }
+    closeModal();
+    setTimeout(() => {
+      openEtiquetaEnvio([{
+        id: m.ID,
+        sku: m.SKU,
+        cantidad: m.Cantidad,
+        zonaOrigen: m.Zona_Origen,
+        zonaDestino: m.Zona_Destino,
+        obra: m.Obra,
+        tipo: m.Tipo,
+      }]);
+      // Pre-cargar la nota si existía
+      setTimeout(() => {
+        const t = document.getElementById('env-destino');
+        if (t && m.Notas) t.value = String(m.Notas);
+      }, 80);
+    }, 120);
+  } catch (err) {
+    toast(err.message || 'Error al buscar movimiento', { type: 'err' });
+  }
+}
+
+async function confirmarEtiquetaEnvio() {
+  const movs = STATE.etiquetaEnvioBatch || [];
+  if (movs.length === 0) { closeModal(); return; }
+
+  const destino = (document.getElementById('env-destino').value || '').trim().toUpperCase();
+  let copias = parseInt(document.getElementById('env-copias').value || '1', 10);
+  if (!copias || copias < 1) copias = 1;
+  if (copias > 20) copias = 20;
+
+  const msgEl = document.getElementById('env-msg');
+  const btn = document.getElementById('env-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Generando...'; }
+  if (msgEl) msgEl.innerHTML = `<div class="alert alert-info">Generando ${movs.length * copias} etiqueta(s)...</div>`;
+
+  try {
+    // 1) Si hay destino, lo persistimos en Movimientos.Notas para cada movimiento.
+    //    (Si re-escanean el QR más adelante igual aparece la nota.)
+    if (destino) {
+      for (const m of movs) {
+        try { await api('updateMovimientoNota', { id: m.id, nota: destino }); }
+        catch (e) { /* no es crítico, sigue generando */ console.warn('No se pudo guardar nota:', e.message); }
+      }
+    }
+
+    // 2) Generar PNG por cada movimiento × copias
+    let totalOk = 0;
+    for (const m of movs) {
+      const prod = STATE.productos.find(p => p.SKU === m.sku);
+      for (let c = 0; c < copias; c++) {
+        await _generarEtiquetaEnvioCanvas({ mov: m, prod, destino, copiaN: c + 1, copiasTot: copias });
+        totalOk++;
+        // chiquito delay para no traba el navegador con N descargas seguidas
+        await new Promise(r => setTimeout(r, 150));
+      }
+    }
+
+    if (msgEl) msgEl.innerHTML = `
+      <div class="alert alert-ok">${totalOk} etiqueta${totalOk === 1 ? '' : 's'} descargada${totalOk === 1 ? '' : 's'} ✓</div>
+      <div class="hint" style="text-align:center;margin-top:6px;">Buscalas en tu carpeta de Descargas. PNG 800×1200 px B&N, listas para impresora térmica.</div>`;
+    if (btn) { btn.textContent = '✓ Listo'; btn.disabled = false; btn.onclick = () => closeModal(); }
+  } catch (err) {
+    if (msgEl) msgEl.innerHTML = `<div class="alert alert-err">${attrEsc(err.message)}</div>`;
+    if (btn) { btn.disabled = false; btn.textContent = '🏷️ Reintentar'; }
+  }
+}
+
+// Compone una etiqueta de envío 800×1200 px en canvas y dispara la descarga.
+// Mismo lenguaje visual que la etiqueta de producto (B&N puro, sin grises,
+// sin emojis) para que salga bien en térmica. Lo único que cambia es:
+//   - Header dice "ENVIO" en vez de "STOCK · EQTC"
+//   - Tiene un bloque GRANDE con el destino fino (si hay)
+//   - El QR codifica el id del movimiento + destino, no el SKU
+//   - Aparece cantidad enviada en monospace gigante
+async function _generarEtiquetaEnvioCanvas({ mov, prod, destino, copiaN, copiasTot }) {
+  // 1) QR apunta a infoMovimiento?id=...&destino=...
+  const params = new URLSearchParams({ action: 'infoMovimiento', id: mov.id });
+  if (destino) params.set('destino', destino);
+  const qrDestino = `${API_URL}?${params.toString()}`;
+  const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(qrDestino)}&size=700x700&margin=1&format=png&ecc=H&color=000000&bgcolor=FFFFFF`;
+  const qrImg = await _loadImageCors(qrApiUrl);
+
+  // 2) Canvas 800x1200 (10x15 cm @ 200 DPI vertical)
+  const W = 800, H = 1200;
+  const canvas = document.createElement('canvas');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  const FONT_SANS = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif';
+  const FONT_MONO = '"SF Mono", Menlo, Consolas, "Liberation Mono", monospace';
+  const BLACK = '#000000', WHITE = '#FFFFFF';
+
+  // Fondo
+  ctx.fillStyle = WHITE; ctx.fillRect(0, 0, W, H);
+
+  // Marco exterior negro grueso
+  ctx.strokeStyle = BLACK; ctx.lineWidth = 6;
+  ctx.strokeRect(3, 3, W - 6, H - 6);
+
+  // --- Header: "ENVÍO" en negro sobre blanco, bien grande ---
+  const headerH = 130;
+  ctx.fillStyle = BLACK;
+  ctx.font = `900 64px ${FONT_SANS}`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('ENVIO', W/2, headerH/2 + 6);
+
+  // Indicador "N/M" si son varias copias del mismo envío
+  if (copiasTot > 1) {
+    ctx.font = `700 22px ${FONT_MONO}`;
+    ctx.textAlign = 'right';
+    ctx.fillText(`${copiaN}/${copiasTot}`, W - 40, 38);
+    ctx.textAlign = 'center';
+  }
+
+  // Doble linea separadora
+  ctx.lineWidth = 5;
+  ctx.beginPath();
+  ctx.moveTo(30, headerH + 14); ctx.lineTo(W - 30, headerH + 14);
+  ctx.stroke();
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(30, headerH + 26); ctx.lineTo(W - 30, headerH + 26);
+  ctx.stroke();
+
+  // --- Nombre del producto (bold, hasta 2 líneas, MAYUSCULAS) ---
+  ctx.fillStyle = BLACK;
+  ctx.font = `800 40px ${FONT_SANS}`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const nombreUpper = (prod ? prod.Nombre : mov.sku).trim().toUpperCase();
+  const nombreLines = _wrapText(ctx, nombreUpper, W - 80, 2);
+  let cursorY = 180;
+  nombreLines.forEach((line, i) => ctx.fillText(line, W/2, cursorY + i * 48));
+  cursorY += (nombreLines.length * 48) + 4;
+
+  // SKU + cantidad en monospace, una sola línea
+  ctx.font = `700 28px ${FONT_MONO}`;
+  const unidad = prod ? (prod.Unidad || '') : '';
+  ctx.fillText(`${mov.sku} · ${mov.cantidad} ${unidad}`.trim(), W/2, cursorY + 6);
+  cursorY += 36;
+
+  // --- Bloque DESTINO ESPECIFICO (si hay) — el corazón de la etiqueta ---
+  // Caja con borde negro grueso, fondo blanco, texto BIEN grande adentro.
+  if (destino) {
+    const boxX = 30, boxY = cursorY + 12;
+    const boxW = W - 60;
+    // Calculo altura segun cuantas lineas entran
+    ctx.font = `900 56px ${FONT_SANS}`;
+    const destLines = _wrapText(ctx, destino.toUpperCase(), boxW - 40, 3);
+    const lineH = 62;
+    const labelH = 38;
+    const padTop = 18, padBot = 22;
+    const boxH = padTop + labelH + (destLines.length * lineH) + padBot;
+
+    // Marco doble (refuerza visualmente que es info crítica)
+    ctx.strokeStyle = BLACK;
+    ctx.lineWidth = 6;
+    ctx.strokeRect(boxX, boxY, boxW, boxH);
+    ctx.lineWidth = 2;
+    ctx.strokeRect(boxX + 10, boxY + 10, boxW - 20, boxH - 20);
+
+    // Label "DESTINO"
+    ctx.fillStyle = BLACK;
+    ctx.font = `700 22px ${FONT_SANS}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillText('DESTINO ESPECIFICO', W/2, boxY + padTop);
+
+    // Texto destino en grande
+    ctx.font = `900 56px ${FONT_SANS}`;
+    destLines.forEach((line, i) => {
+      ctx.fillText(line, W/2, boxY + padTop + labelH + i * lineH);
+    });
+    cursorY = boxY + boxH + 14;
+  } else {
+    cursorY += 8;
+  }
+
+  // --- QR (lo más grande posible con el espacio que quedó) ---
+  const qrFrameMax = 460;
+  const qrAvailH = H - cursorY - 110; // dejo ~110 px para footer
+  const qrFrameSize = Math.min(qrFrameMax, qrAvailH);
+  const qrFrameX = (W - qrFrameSize) / 2;
+  const qrFrameY = cursorY;
+  ctx.strokeStyle = BLACK; ctx.lineWidth = 4;
+  ctx.strokeRect(qrFrameX, qrFrameY, qrFrameSize, qrFrameSize);
+  const qrPad = 12;
+  ctx.drawImage(qrImg, qrFrameX + qrPad, qrFrameY + qrPad, qrFrameSize - qrPad * 2, qrFrameSize - qrPad * 2);
+
+  // --- Footer: ID del movimiento (chico) + instrucción ---
+  ctx.fillStyle = BLACK;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.font = `600 18px ${FONT_SANS}`;
+  ctx.fillText('ESCANEA PARA VER DETALLES', W/2, qrFrameY + qrFrameSize + 18);
+  ctx.font = `500 14px ${FONT_MONO}`;
+  ctx.fillStyle = '#000000';
+  ctx.fillText(mov.id, W/2, qrFrameY + qrFrameSize + 46);
+
+  // 3) Descarga
+  const pngBlob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+  const pngUrl = URL.createObjectURL(pngBlob);
+  const a = document.createElement('a');
+  a.href = pngUrl;
+  const slugDest = destino ? '_' + _slugify(destino) : '';
+  const nCopia = copiasTot > 1 ? `_${copiaN}de${copiasTot}` : '';
+  a.download = `envio_${mov.sku}${slugDest}${nCopia}.png`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(pngUrl), 3000);
+}
+
 // ---- Helpers para la etiqueta ----
 function _loadImageCors(url) {
   return new Promise((res, rej) => {
@@ -3257,6 +3571,10 @@ async function showConsumoObra(codigo) {
       html += data.movimientos.map(m => {
         const fecha = m.Fecha ? new Date(m.Fecha).toLocaleDateString('es-AR', {day:'2-digit',month:'2-digit',year:'2-digit'}) : '';
         const prod = STATE.productos.find(p => p.SKU === m.SKU);
+        // Botón reimprimir etiqueta para Egresos y Traslados (los únicos que viajan).
+        const reimprimir = (m.Tipo === 'Egreso' || m.Tipo === 'Traslado') && m.ID
+          ? `<button class="btn-icon" title="Reimprimir etiqueta de envío" onclick='event.stopPropagation();reimprimirEtiquetaEnvio(${jsStr(m.ID)})' style="background:transparent;border:none;cursor:pointer;font-size:18px;padding:4px 6px;margin-right:4px;">🏷️</button>`
+          : '';
         return `
           <div class="mov-row">
             <span class="tipo ${attrEsc(m.Tipo)}">${attrEsc(m.Tipo)}</span>
@@ -3264,7 +3582,9 @@ async function showConsumoObra(codigo) {
               <div><strong>${attrEsc(prod ? prod.Nombre : m.SKU)}</strong></div>
               <small style="color:var(--muted);">${fecha}${m.Usuario ? ' · ' + attrEsc(m.Usuario) : ''}${m.Notas ? ' · ' + attrEsc(m.Notas) : ''}</small>
             </div>
-            <div style="text-align:right;font-weight:600;">${m.Cantidad}</div>
+            <div style="text-align:right;font-weight:600;display:flex;align-items:center;gap:4px;justify-content:flex-end;">
+              ${reimprimir}<span>${m.Cantidad}</span>
+            </div>
           </div>`;
       }).join('');
       html += `</div>`;

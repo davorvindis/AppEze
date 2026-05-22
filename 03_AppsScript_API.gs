@@ -53,6 +53,7 @@ const SHEET_STOCK = 'Stock_Actual';
 function doGet(e) {
   const action = (e.parameter || {}).action;
   if (action === 'infoProducto') return servirInfoProductoHTML(e.parameter.sku || '');
+  if (action === 'infoMovimiento') return servirInfoMovimientoHTML(e.parameter.id || '', e.parameter.destino || '');
   return handle(e);
 }
 
@@ -87,6 +88,7 @@ function handle(e) {
       case 'getReservasDetalle': result = getReservasDetalle(); break;
       case 'getAlertas':         result = getAlertas(); break;
       case 'addMovimiento':      result = addMovimiento(params); break;
+      case 'updateMovimientoNota': result = updateMovimientoNota(params); break;
       case 'addProducto':        result = addProducto(params); break;
       case 'eliminarProducto':   result = eliminarProducto(params); break;
       case 'addObra':            result = addObra(params); break;
@@ -335,6 +337,45 @@ function getStockEnZona(sku, zona) {
   const row = stock.find(r => String(r.SKU) === skuStr);
   if (!row) return 0;
   return parseFloat(row[zona] || 0);
+}
+
+// Actualiza la columna K (Notas) de un movimiento puntual. Lo usamos cuando
+// imprimís la etiqueta de envío y cargás el "destino específico" — se guarda
+// en la misma columna Notas para que quede registrado en el historial sin
+// romper el modelo de datos (Notas siempre fue free text). Si el movimiento
+// ya tenía notas, las preservamos concatenando con " · ".
+function updateMovimientoNota(params) {
+  const id = (params.id || '').toString().trim();
+  const nota = (params.nota || '').toString().trim();
+  if (!id) throw new Error('Falta id de movimiento');
+
+  const s = sheet(SHEET_MOVIMIENTOS);
+  const values = s.getDataRange().getValues();
+  // Encontrar columna Notas por header (defensivo — si cambia el orden no rompe)
+  const headers = values[0];
+  let colNotas = headers.indexOf('Notas');
+  if (colNotas === -1) colNotas = 10; // fallback: columna K (índice 10)
+
+  for (let i = 1; i < values.length; i++) {
+    if (String(values[i][0]) === id) {
+      const prev = (values[i][colNotas] || '').toString().trim();
+      // Si la nota nueva ya estaba contenida en la previa, no duplicar.
+      let nuevo = nota;
+      if (prev && nota && prev.indexOf(nota) === -1) {
+        nuevo = prev + ' · ' + nota;
+      } else if (prev && !nota) {
+        nuevo = prev;
+      } else if (!nota) {
+        nuevo = prev;
+      } else if (prev.indexOf(nota) !== -1) {
+        nuevo = prev;
+      }
+      s.getRange(i + 1, colNotas + 1).setValue(nuevo);
+      SpreadsheetApp.flush();
+      return { id, nota: nuevo };
+    }
+  }
+  throw new Error('Movimiento no encontrado: ' + id);
 }
 
 // ============== ESCRITURA: Productos ==============
@@ -980,5 +1021,245 @@ function servirInfoProductoHTML(sku) {
 
   return HtmlService.createHtmlOutput(html)
     .setTitle(p.Nombre + ' · Stock')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+// ============== VISTA PÚBLICA: MOVIMIENTO (destino del QR de envío) ==============
+// Esta es la página que se abre cuando alguien escanea un QR de etiqueta
+// de envío. Muestra:
+//   - Modal grande con la NOTA DE DESTINO (ej: "BAÑOS PLANTA ALTA") que tapa
+//     todo y se cierra con la X. Es lo primero que ve el receptor.
+//   - Detrás, info del movimiento: producto, cantidad enviada, obra/zona destino,
+//     fecha, quién lo envió.
+// La nota viene por URL (param `destino`) — el QR la incluye al imprimirse —
+// y también la persistimos en Movimientos.Notas al imprimir, así si re-escanean
+// más tarde igual aparece.
+function servirInfoMovimientoHTML(id, destinoFromUrl) {
+  id = (id || '').trim();
+  destinoFromUrl = (destinoFromUrl || '').trim();
+
+  const errHtml = (msg) =>
+    `<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">` +
+    `<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">` +
+    `<title>Movimiento</title></head>` +
+    `<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;` +
+    `margin:0;padding:32px 20px;text-align:center;background:#F4F6F9;color:#222;font-size:17px;">` +
+    `<div style="font-size:56px;margin-bottom:8px;">❓</div>` +
+    `<h1 style="color:#C0392B;font-size:26px;margin:0 0 12px;">${msg}</h1>` +
+    `<p style="color:#6B7280;font-size:16px;">ID: <code style="font-size:17px;">${id || '—'}</code></p>` +
+    `</body></html>`;
+
+  if (!id) return HtmlService.createHtmlOutput(errHtml('Falta ID de movimiento'))
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+
+  const mov = sheetData(SHEET_MOVIMIENTOS).find(m => String(m.ID) === id);
+  if (!mov) return HtmlService.createHtmlOutput(errHtml('Movimiento no encontrado'))
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+
+  // Lookup auxiliar — nombre lindo del producto, zona y obra
+  const prod = getProducts().find(p => String(p.SKU) === String(mov.SKU));
+  const zonas = getZones();
+  const obras = sheetData(SHEET_OBRAS);
+
+  const zonaOrigenNom = (zonas.find(z => z.Codigo === mov.Zona_Origen) || {}).Nombre || mov.Zona_Origen || '';
+  const zonaDestinoNom = (zonas.find(z => z.Codigo === mov.Zona_Destino) || {}).Nombre || mov.Zona_Destino || '';
+  const obraNom = (obras.find(o => o.Codigo === mov.Obra) || {}).Nombre || mov.Obra || '';
+
+  // Nota a mostrar en el modal: prioridad URL > Movimientos.Notas (por si re-escanean
+  // un QR viejo que no tenía el param).
+  const notaModal = destinoFromUrl || (mov.Notas || '').toString().trim();
+
+  // Fecha en formato AR
+  let fechaStr = '';
+  try {
+    const f = new Date(mov.Fecha);
+    fechaStr = Utilities.formatDate(f, Session.getScriptTimeZone(), 'dd/MM/yyyy HH:mm');
+  } catch (_) {
+    fechaStr = String(mov.Fecha || '');
+  }
+
+  // Foto del producto (mismo fix que infoProducto)
+  let foto = prod ? (prod.Foto_URL || '') : '';
+  if (foto && /drive\.google\.com\/uc\b/.test(foto)) {
+    const m = String(foto).match(/[?&]id=([A-Za-z0-9_-]+)/);
+    if (m) foto = 'https://drive.google.com/thumbnail?id=' + m[1] + '&sz=w1000';
+  }
+
+  // Color del header según tipo
+  const tipoColor = mov.Tipo === 'Egreso' ? '#E67E22'
+                  : mov.Tipo === 'Traslado' ? '#143757'
+                  : '#6B7280';
+
+  // Escape básico para inyectar texto del usuario en HTML
+  const esc = (s) => String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+  // Destino "principal" (para el bloque grande): zona destino para Traslado,
+  // obra para Egreso. Si no hay nada cae a "—".
+  const destinoPpal = mov.Tipo === 'Egreso'
+    ? (obraNom || mov.Obra || '—')
+    : (zonaDestinoNom || mov.Zona_Destino || '—');
+
+  const html = `<!DOCTYPE html>
+<html lang="es"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="${tipoColor}">
+<title>Envío · ${esc(prod ? prod.Nombre : mov.SKU)}</title>
+<style>
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html, body { margin:0; padding:0; }
+  body {
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    background:#F4F6F9; color:#1F2937;
+    font-size:19px; line-height:1.45;
+    padding-bottom:env(safe-area-inset-bottom);
+    -webkit-text-size-adjust:100%;
+  }
+  header {
+    background:${tipoColor}; color:#fff;
+    padding:calc(20px + env(safe-area-inset-top)) 20px 20px;
+    text-align:center; font-size:19px; font-weight:700; letter-spacing:.03em;
+    text-transform:uppercase;
+  }
+  .wrap { max-width:480px; margin:0 auto; padding:14px; }
+  .card {
+    background:#fff; border-radius:14px; padding:20px;
+    margin-bottom:14px; box-shadow:0 2px 8px rgba(0,0,0,.06);
+  }
+  h1 { margin:0 0 8px; font-size:28px; line-height:1.2; color:#143757; font-weight:800; }
+  .sku {
+    display:inline-block; font-family:"SF Mono",Menlo,Consolas,monospace;
+    font-size:16px; color:#374151; background:#F3F4F6;
+    padding:5px 12px; border-radius:6px;
+  }
+  img.foto {
+    width:100%; max-height:280px; object-fit:cover;
+    border-radius:12px; display:block; margin-top:14px;
+    background:#E3E7ED;
+  }
+  .big-label { text-align:center; color:#9CA3AF; font-size:13px; text-transform:uppercase; letter-spacing:.08em; font-weight:600; margin-bottom:6px; }
+  .big { font-size:72px; font-weight:800; color:#143757; text-align:center; line-height:1; letter-spacing:-.02em; }
+  .big-unit { font-size:22px; color:#6B7280; text-align:center; margin-top:8px; font-weight:500; }
+  .destino-box {
+    margin-top:14px; padding:16px;
+    background:#FEF3C7; color:#78350F; border-radius:10px;
+    text-align:center;
+  }
+  .destino-box .lbl { font-size:13px; text-transform:uppercase; letter-spacing:.08em; font-weight:700; opacity:.8; margin-bottom:6px; }
+  .destino-box .val { font-size:22px; font-weight:800; }
+  table.info { width:100%; border-collapse:collapse; font-size:17px; }
+  table.info td { padding:12px 4px; border-bottom:1px solid #E5E7EB; }
+  table.info td:first-child { color:#6B7280; }
+  table.info td:last-child { text-align:right; font-weight:700; }
+  table.info tr:last-child td { border-bottom:none; }
+  footer { text-align:center; color:#9CA3AF; font-size:13px; padding:18px 20px calc(18px + env(safe-area-inset-bottom)); }
+
+  /* ===== MODAL DE NOTA DE DESTINO ===== */
+  .modal-overlay {
+    position:fixed; inset:0;
+    background:rgba(20,55,87,.92);
+    display:flex; align-items:center; justify-content:center;
+    padding:24px; z-index:9999;
+    animation:fadeIn .15s ease-out;
+  }
+  .modal-overlay.hidden { display:none; }
+  @keyframes fadeIn { from { opacity:0 } to { opacity:1 } }
+  .modal-card {
+    background:#FEF3C7; color:#78350F;
+    border-radius:18px; max-width:420px; width:100%;
+    padding:48px 28px 36px; text-align:center;
+    box-shadow:0 20px 60px rgba(0,0,0,.4);
+    position:relative;
+  }
+  .modal-card .close {
+    position:absolute; top:10px; right:10px;
+    width:44px; height:44px; border:none; background:transparent;
+    font-size:32px; line-height:1; color:#78350F; cursor:pointer;
+    border-radius:50%;
+  }
+  .modal-card .close:hover { background:rgba(120,53,15,.12); }
+  .modal-card .pre {
+    font-size:14px; font-weight:700; text-transform:uppercase;
+    letter-spacing:.12em; opacity:.7; margin-bottom:14px;
+  }
+  .modal-card .nota {
+    font-size:36px; font-weight:800; line-height:1.2;
+    margin:0 0 18px; word-wrap:break-word;
+  }
+  .modal-card .meta {
+    font-size:15px; font-weight:600; opacity:.75;
+    border-top:1px solid rgba(120,53,15,.2);
+    padding-top:14px; margin-top:14px;
+  }
+  @media (max-width:360px) {
+    .modal-card .nota { font-size:28px; }
+  }
+</style></head>
+<body>
+
+${notaModal ? `
+<div class="modal-overlay" id="notaModal" onclick="cerrarNota(event)">
+  <div class="modal-card" onclick="event.stopPropagation()">
+    <button class="close" onclick="cerrarNota()" aria-label="Cerrar">×</button>
+    <div class="pre">📍 Destino de este envío</div>
+    <div class="nota">${esc(notaModal)}</div>
+    <div class="meta">${esc(prod ? prod.Nombre : mov.SKU)} · ${esc(mov.Cantidad)} ${esc(prod ? (prod.Unidad || '') : '')}</div>
+  </div>
+</div>
+` : ''}
+
+<header>${esc(mov.Tipo === 'Egreso' ? '→ Egreso a obra' : (mov.Tipo === 'Traslado' ? '↔ Traslado' : mov.Tipo))}</header>
+<div class="wrap">
+  <div class="card">
+    <h1>${esc(prod ? prod.Nombre : mov.SKU)}</h1>
+    <span class="sku">${esc(mov.SKU)}</span>
+    ${foto ? `<img class="foto" src="${esc(foto)}" alt="" onerror="this.style.display='none'">` : ''}
+  </div>
+  <div class="card">
+    <div class="big-label">Cantidad enviada</div>
+    <div class="big">${esc(mov.Cantidad)}</div>
+    <div class="big-unit">${esc(prod ? (prod.Unidad || '') : '')}</div>
+    ${notaModal ? `
+      <div class="destino-box">
+        <div class="lbl">📍 Destino específico</div>
+        <div class="val">${esc(notaModal)}</div>
+      </div>
+    ` : ''}
+  </div>
+  <div class="card">
+    <table class="info">
+      ${mov.Tipo === 'Egreso' ? `
+        <tr><td>Obra</td><td>${esc(obraNom)}</td></tr>
+        <tr><td>Sale de</td><td>${esc(zonaOrigenNom)}</td></tr>
+      ` : `
+        <tr><td>Desde</td><td>${esc(zonaOrigenNom)}</td></tr>
+        <tr><td>Hacia</td><td>${esc(zonaDestinoNom || destinoPpal)}</td></tr>
+      `}
+      <tr><td>Fecha</td><td>${esc(fechaStr)}</td></tr>
+      ${mov.Usuario ? `<tr><td>Enviado por</td><td>${esc(mov.Usuario)}</td></tr>` : ''}
+      <tr><td>ID</td><td><code style="font-size:13px;">${esc(id)}</code></td></tr>
+    </table>
+  </div>
+</div>
+<footer>Escaneado desde la etiqueta de envío · EQTC</footer>
+
+<script>
+  function cerrarNota(e) {
+    if (e && e.target && e.target.closest && e.target.closest('.modal-card') && e.target.tagName !== 'BUTTON') return;
+    var m = document.getElementById('notaModal');
+    if (m) m.classList.add('hidden');
+  }
+  // Tecla Escape también cierra
+  document.addEventListener('keydown', function(ev) {
+    if (ev.key === 'Escape') cerrarNota();
+  });
+</script>
+
+</body></html>`;
+
+  return HtmlService.createHtmlOutput(html)
+    .setTitle('Envío · ' + (prod ? prod.Nombre : mov.SKU))
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
