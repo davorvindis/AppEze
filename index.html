@@ -3359,26 +3359,34 @@ async function _generarEtiquetaEnvioCanvas({ mov, prod, destino, copiaN, copiasT
     cursorY += 8;
   }
 
-  // --- QR (lo más grande posible con el espacio que quedó) ---
-  const qrFrameMax = 460;
-  const qrAvailH = H - cursorY - 110; // dejo ~110 px para footer
-  const qrFrameSize = Math.min(qrFrameMax, qrAvailH);
+  // --- QR (lo más grande posible — incluso un toque más grande que la
+  // etiqueta de producto, porque acá no tenemos chip de categoria/foto
+  // y queremos que el QR sea el protagonista).
+  // Reservo 80 px desde el borde inferior para el footer fijo. Si sobra
+  // espacio entre el contenido superior y el QR, lo centro verticalmente
+  // para que no quede hueco abajo cuando el destino es corto.
+  const footerReserve = 80;
+  const qrFrameMax = 680;
+  const qrAvailH = H - cursorY - footerReserve;
+  const qrFrameSize = Math.min(qrFrameMax, Math.max(300, qrAvailH));
+  const spareV = Math.max(0, qrAvailH - qrFrameSize);
+  const qrFrameY = cursorY + spareV / 2;
   const qrFrameX = (W - qrFrameSize) / 2;
-  const qrFrameY = cursorY;
   ctx.strokeStyle = BLACK; ctx.lineWidth = 4;
   ctx.strokeRect(qrFrameX, qrFrameY, qrFrameSize, qrFrameSize);
-  const qrPad = 12;
+  const qrPad = 14;
   ctx.drawImage(qrImg, qrFrameX + qrPad, qrFrameY + qrPad, qrFrameSize - qrPad * 2, qrFrameSize - qrPad * 2);
 
-  // --- Footer: ID del movimiento (chico) + instrucción ---
+  // --- Footer: anclado al borde inferior, no relativo a la QR ---
+  // De esta manera siempre cae al mismo lugar visualmente,
+  // independientemente del tamaño de la QR o del destino.
   ctx.fillStyle = BLACK;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
-  ctx.font = `600 18px ${FONT_SANS}`;
-  ctx.fillText('ESCANEA PARA VER DETALLES', W/2, qrFrameY + qrFrameSize + 18);
-  ctx.font = `500 14px ${FONT_MONO}`;
-  ctx.fillStyle = '#000000';
-  ctx.fillText(mov.id, W/2, qrFrameY + qrFrameSize + 46);
+  ctx.font = `600 22px ${FONT_SANS}`;
+  ctx.fillText('ESCANEA PARA VER DETALLES', W/2, H - footerReserve + 8);
+  ctx.font = `500 16px ${FONT_MONO}`;
+  ctx.fillText(mov.id, W/2, H - footerReserve + 42);
 
   // 3) Descarga
   const pngBlob = await new Promise(r => canvas.toBlob(r, 'image/png'));
